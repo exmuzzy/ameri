@@ -263,3 +263,25 @@ def test_update_request_like_the_button(env, monkeypatch):
     assert state == {"status": {"state": "done", "commit": "abc"}, "request_stale": False}
     assert "request_update(" in inspect.getsource(__import__("views.updates", fromlist=["x"]).render_update_panel)
     assert updates.STALE_REQUEST_SECONDS == 120
+
+
+def test_delete_chat_by_owner_or_admin(env):
+    client, settings = env
+    anna, boris, boss, root = (login(client, n) for n in ("anna", "boris", "boss", "root"))
+    ids = []
+    for _ in range(2):
+        chat = client.post("/api/v1/chats", json={"title": "удалить"}, headers=anna).json()
+        client.post(f"/api/v1/chats/{chat['id']}/messages", data={"text": "x", "action": "ask"},
+                    files=[("files", ("a.md", b"d=200", "text/markdown"))], headers=anna)
+        ids.append(chat["id"])
+    answer = client.get(f"/api/v1/chats/{ids[0]}/messages", headers=boss).json()["messages"][1]
+    client.post(f"/api/v1/messages/{answer['id']}/feedback", json={"rating": 1}, headers=boss)
+
+    assert client.delete(f"/api/v1/chats/{ids[0]}", headers=boris).status_code == 403
+    assert client.delete(f"/api/v1/chats/{ids[0]}", headers=boss).status_code == 403
+    assert client.delete(f"/api/v1/chats/{ids[0]}", headers=anna).status_code == 204
+    assert client.delete(f"/api/v1/chats/{ids[1]}", headers=root).status_code == 204
+    assert client.get(f"/api/v1/chats/{ids[0]}/messages", headers=anna).status_code == 404
+    assert client.get("/api/v1/chats", headers=anna).json() == []
+    assert not (settings.files_dir / str(ids[0])).exists()
+    assert client.delete("/api/v1/chats/999", headers=root).status_code == 404

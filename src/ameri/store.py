@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -301,6 +302,17 @@ class Store:
             )
             for row in rows
         ]
+
+    def delete_chat(self, chat_id: int) -> None:
+        """Удалить Чат целиком: сообщения, оценки, вложения и их файлы на диске."""
+
+        with self._connect() as db:
+            messages = "SELECT id FROM messages WHERE chat_id = ?"
+            db.execute(f"DELETE FROM feedback WHERE message_id IN ({messages})", (chat_id,))
+            db.execute(f"DELETE FROM attachments WHERE message_id IN ({messages})", (chat_id,))
+            db.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
+            db.execute("DELETE FROM chats WHERE id = ?", (chat_id,))
+        shutil.rmtree(self.files_dir / str(chat_id), ignore_errors=True)
 
     def get_message(self, message_id: int) -> Message | None:
         with self._connect() as db:

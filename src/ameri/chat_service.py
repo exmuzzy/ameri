@@ -31,6 +31,12 @@ def can_open(access: Access, user: User, chat: Chat) -> bool:
     return chat.owner == user.login or access.can(user, "chat.view_all")
 
 
+def can_delete(user: User, chat: Chat) -> bool:
+    """Удалить Чат может его автор или Администратор."""
+
+    return chat.owner == user.login or user.role == "admin"
+
+
 def visible_chats(store: Store, access: Access, user: User, query: str = "", author: str | None = None) -> list[Chat]:
     if access.can(user, "chat.view_all"):
         return store.list_chats(owner=author, query=query)

@@ -271,6 +271,13 @@ def create_app(settings_factory=load_settings) -> FastAPI:
         require(access, user, "chat.create")
         return _chat_out(store.get_chat(store.create_chat(body.title, user.login)))
 
+    @app.delete("/api/v1/chats/{chat_id}", status_code=204)
+    def delete_chat(chat_id: int, user: UserDep, store: StoreDep, access: AccessDep) -> None:
+        chat = open_chat(store, access, user, chat_id)
+        if not chat_service.can_delete(user, chat):
+            raise HTTPException(403, "Удалить чат может его автор или администратор")
+        store.delete_chat(chat.id)
+
     @app.get("/api/v1/chats/{chat_id}/messages")
     def chat_messages(chat_id: int, user: UserDep, store: StoreDep, access: AccessDep) -> dict:
         chat = open_chat(store, access, user, chat_id)

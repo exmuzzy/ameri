@@ -8,6 +8,7 @@ AMERI_DEMO_LEADER_PASSWORD.
     python tools/demo_via_api.py --setup-users   # завести демо-пользователей или сменить им пароли
     python tools/demo_via_api.py                 # все сценарии (чат с таким названием уже есть — пропуск)
     python tools/demo_via_api.py --only 4        # один сценарий
+    python tools/demo_via_api.py --only 4 --recreate   # удалить демо-чат сценария и провести заново
     python tools/demo_via_api.py --followup      # ещё по сообщению в чаты, где задан followup
     python tools/demo_via_api.py --report        # что сейчас в демо-чатах (глазами руководителя)
 """
@@ -141,10 +142,16 @@ def feedback(api: Api, who: str, chat_id: int, spec: dict) -> None:
     log(f"  {who} {mark} ответ #{answer['id']}{' ✏️ исправление в чате' if body['correction'] else ''} (статус {status})")
 
 
-def run_scenario(api: Api, users: dict, scenario: dict) -> None:
+def run_scenario(api: Api, users: dict, scenario: dict, recreate: bool = False) -> None:
     manager = users["manager"]["login"]
     title = scenario["title"]
-    if any(c["title"] == title for c in api.get(manager, "/chats")):
+    existing = [c for c in api.get(manager, "/chats") if c["title"] == title]
+    if existing and recreate:
+        for chat in existing:
+            api.request(manager, "DELETE", f"/chats/{chat['id']}")
+            log(f"#{scenario['id']} «{title}» — чат {chat['id']} удалён")
+        existing = []
+    if existing:
         log(f"#{scenario['id']} «{title}» уже есть — пропуск")
         return
     for step in scenario["steps"]:
@@ -198,6 +205,7 @@ def main() -> None:
     parser.add_argument("--update-site", action="store_true")
     parser.add_argument("--setup-users", action="store_true")
     parser.add_argument("--only", type=int, help="номер сценария")
+    parser.add_argument("--recreate", action="store_true", help="удалить существующий демо-чат и провести сценарий заново")
     parser.add_argument("--followup", action="store_true")
     parser.add_argument("--report", action="store_true")
     args = parser.parse_args()
@@ -224,7 +232,7 @@ def main() -> None:
         followup(api, users, scenarios)
     else:
         for scenario in scenarios:
-            run_scenario(api, users, scenario)
+            run_scenario(api, users, scenario, args.recreate)
 
 
 if __name__ == "__main__":

@@ -135,6 +135,7 @@ python tools/run_evals.py --no-harness      # для сравнения — бе
 | `GET /api/v1/me` | логин, имя, роль, гранты, доступные действия | всем |
 | `GET /api/v1/chats?query=&author=` | видимые чаты | менеджер — свои, `chat.view_all` — все |
 | `POST /api/v1/chats {title}` | новый чат | `chat.create` |
+| `DELETE /api/v1/chats/{id}` | удалить чат с сообщениями, оценками и файлами | автор чата и `admin` |
 | `GET /api/v1/chats/{id}/messages` | сообщения с вложениями (id, имя, размер) и оценками | автор чата и `chat.view_all` |
 | `POST /api/v1/chats/{id}/messages` | multipart: `text`, `action` = `ask` \| `duct_calc` \| `note`, `connection` = `flange` \| `socket` \| `none`, `files` (можно несколько); ответ — сообщение пользователя и ассистента | как на сайте |
 | `GET /api/v1/files/{attachment_id}` | скачать вложение или расчётку | кто видит чат |
