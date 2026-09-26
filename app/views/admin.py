@@ -21,7 +21,7 @@ def _key_section() -> None:
         st.success("Ключ задан переменной окружения на сервере.")
         return
     st.caption("Ключ хранится только на сервере, в файле с доступом для владельца. На странице он не показывается.")
-    st.write("Статус: " + ("✅ задан" if settings.api_key() else "❌ не задан"))
+    st.write("Статус: " + ("ключ задан" if settings.api_key() else "ключ не задан"))
     with st.form("api_key", clear_on_submit=True):
         key = st.text_input("Новый ключ", type="password", placeholder="sk-…")
         if st.form_submit_button("Сохранить ключ", type="primary") and key.strip():
@@ -69,6 +69,7 @@ def _users_section() -> None:
 
 def render() -> None:
     st.title("Настройки")
+    st.caption("Управление обновлениями, ключом ассистента и учётными записями")
     render_update_panel()
     st.divider()
     _key_section()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 from views.common import current_user, get_settings, get_store
+from views.theme import article
 
 STEPS = [
     ("read_about", "Прочитать «О проекте»: что делает ameri и главный принцип «модель не калькулятор»."),
@@ -48,14 +49,16 @@ def render() -> None:
     user = current_user()
     store = get_store()
     st.title("Новому сотруднику")
-    st.markdown((get_settings().site_dir / "onboarding.md").read_text(encoding="utf-8"))
+    st.caption("Первые шаги · 15–20 минут")
+    article((get_settings().site_dir / "onboarding.md").read_text(encoding="utf-8"))
 
     done = store.onboarding_done(user.login)
     st.progress(len(done & {k for k, _ in STEPS}) / len(STEPS), text=f"Выполнено {len(done)} из {len(STEPS)}")
+    st.subheader("Ваш чек-лист")
     for key, text in STEPS:
         checked = st.checkbox(text, value=key in done, key=f"onb-{key}")
         if checked != (key in done):
             store.set_onboarding(user.login, key, checked)
             st.rerun()
-    if st.button("Открыть учебный чат", type="primary"):
+    if st.button("Открыть учебный чат", type="primary", icon=":material/forum:"):
         _open_sandbox()

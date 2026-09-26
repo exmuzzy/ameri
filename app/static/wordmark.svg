@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="190" height="48" viewBox="0 0 190 48">
+  <rect x="1" y="1" width="188" height="46" rx="11" fill="#176F78"/>
+  <path d="M11 33 22 14l11 19M16 26h12" fill="none" stroke="#F6F8F7" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M42 10v28" stroke="#86C3C5" stroke-opacity=".7"/>
+  <text x="54" y="34" font-family="DejaVu Sans, sans-serif" font-size="29" font-weight="700" letter-spacing="-1.5" fill="#F6F8F7">ameri</text>
+</svg>
