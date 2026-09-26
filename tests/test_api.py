@@ -285,3 +285,59 @@ def test_delete_chat_by_owner_or_admin(env):
     assert client.get("/api/v1/chats", headers=anna).json() == []
     assert not (settings.files_dir / str(ids[0])).exists()
     assert client.delete("/api/v1/chats/999", headers=root).status_code == 404
+
+
+def test_personal_token_from_site(env):
+    client, settings = env
+    store = Store(settings.db_path, settings.files_dir)
+    token, item = store.create_api_token("anna", "Claude Code", days=30)
+    assert token.startswith("ameri_") and item.active
+    headers = {"Authorization": f"Bearer {token}"}
+    assert client.get("/api/v1/me", headers=headers).json()["login"] == "anna"
+    assert store.list_api_tokens("anna")[0].last_used_at is not None
+    assert client.get("/api/v1/me", headers={"Authorization": "Bearer ameri_wrong"}).status_code == 401
+
+    store.revoke_api_token(item.id)
+    assert client.get("/api/v1/me", headers=headers).status_code == 401
+
+    expired, _ = store.create_api_token("anna", "старый", days=-1)
+    assert client.get("/api/v1/me", headers={"Authorization": f"Bearer {expired}"}).status_code == 401
+    forever, item = store.create_api_token("anna", "без срока", days=None)
+    assert item.expires_at is None
+    assert client.get("/api/v1/me", headers={"Authorization": f"Bearer {forever}"}).status_code == 200
+
+
+def _token_page_script():
+    import sys
+    from pathlib import Path
+
+    import streamlit as st
+
+    sys.path[:0] = [str(Path.cwd() / "app"), str(Path.cwd() / "src")]
+    from ameri.auth import User
+    from views import api_access
+
+    st.session_state["user"] = User("anna", "Анна", "manager", "")
+    api_access.render()
+
+
+def test_api_token_page_creates_and_revokes(tmp_path, monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setenv("AMERI_DATA_DIR", str(tmp_path))
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+    page = AppTest.from_function(_token_page_script, default_timeout=30).run()
+    assert not page.exception
+    page.text_input[0].input("Claude Code")
+    page.button[0].click().run()
+    token = page.code[0].value
+    assert token.startswith("ameri_")
+
+    store = Store(tmp_path / "ameri.sqlite3", tmp_path / "files")
+    assert store.api_token_login(token) == "anna"
+    assert [t.name for t in store.list_api_tokens("anna")] == ["Claude Code"]
+
+    page.run()
+    assert not any(c.value.startswith("ameri_") for c in page.code)  # токен показывается один раз
+    next(b for b in page.button if b.label == "Отозвать").click().run()
+    assert store.api_token_login(token) is None

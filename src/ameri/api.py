@@ -1,7 +1,9 @@
 """HTTP API сайта: те же Чаты, действия и Исправления, что в Streamlit, для скриптов и агентов.
 
-Запуск: ``uvicorn --app-dir src ameri.api:app --port 8000``. Токен — HMAC-подпись логина и
-срока действия секретом из ``<data>/secrets/api_secret``; права проверяет ``Access.can``.
+Запуск: ``uvicorn --app-dir src ameri.api:app --port 8000``. Токены двух видов: личный, созданный
+на сайте на странице «Доступ к API» (``ameri_…``, в базе — только хэш), и временный из
+``POST /api/v1/login`` — HMAC-подпись логина и срока секретом ``<data>/secrets/api_secret``.
+Права проверяет ``Access.can``.
 """
 
 import base64
@@ -23,7 +25,7 @@ from . import actions, chat_service, updates, users_service
 from .auth import User, authenticate, load_users
 from .harness import Access, load_access
 from .settings import Settings, load_settings
-from .store import Attachment, Chat, Feedback, Message, Store
+from .store import API_TOKEN_PREFIX, Attachment, Chat, Feedback, Message, Store
 
 TOKEN_TTL = 12 * 3600
 LOGIN_WINDOW = 15 * 60
@@ -206,12 +208,19 @@ def create_app(settings_factory=load_settings) -> FastAPI:
 
     def current_user(
         settings: Annotated[Settings, Depends(get_settings)],
+        store: Annotated[Store, Depends(get_store)],
         authorization: Annotated[str, Header()] = "",
     ) -> User:
         scheme, _, token = authorization.partition(" ")
+        token = token.strip()
         user = None
         if scheme.lower() == "bearer" and token:
-            user = read_token(api_secret(settings), token.strip(), load_users(settings.users_file))
+            users = load_users(settings.users_file)
+            if token.startswith(API_TOKEN_PREFIX):
+                # Личный токен, созданный на сайте («Доступ к API»).
+                user = users.get(store.api_token_login(token) or "")
+            else:
+                user = read_token(api_secret(settings), token, users)
         if user is None:
             raise HTTPException(401, "Нужен действующий токен: POST /api/v1/login", headers={"WWW-Authenticate": "Bearer"})
         return user

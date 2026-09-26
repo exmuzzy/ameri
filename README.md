@@ -143,11 +143,12 @@ python tools/run_evals.py --no-harness      # для сравнения — бе
 | `GET /api/v1/users`, `POST /api/v1/users {login, name, role, password}`, `DELETE /api/v1/users/{login}` | пользователи — как форма в «Настройках» | только `admin` |
 | `POST /api/v1/update`, `GET /api/v1/update` | «Обновить сайт из репозитория» и статус обновления (`status.state`: `running` / `done` / `error`, `status.commit`) | `admin` и `harness.edit` |
 
+**Токен.** Проще всего — личный токен: на сайте страница **«Доступ к API»** → «Создать токен» (название, срок: 30 дней, 90 дней, год или без срока). Токен вида `ameri_…` показывается один раз, в базе хранится только его хэш; там же видно, когда им пользовались, и его можно отозвать (администратор видит и отзывает токены всех). Второй способ — `POST /api/v1/login` с логином и паролем, токен на 12 часов.
+
 Остальные запросы — с заголовком `Authorization: Bearer <token>`. Токен подписан секретом `data/secrets/api_secret` (создаётся при первом запуске); смена пароля или удаление пользователя отзывает его токены. Утверждения правил и ключа DeepSeek в API нет — только на сайте.
 
 ```bash
-TOKEN=$(curl -s https://<сайт>/api/v1/login -H 'content-type: application/json' \
-  -d '{"login": "anna", "password": "..."}' | jq -r .token)
+TOKEN=ameri_...   # со страницы «Доступ к API»
 curl -s https://<сайт>/api/v1/chats -H "Authorization: Bearer $TOKEN"
 curl -s https://<сайт>/api/v1/chats/12/messages -H "Authorization: Bearer $TOKEN" \
   -F action=duct_calc -F connection=socket -F text="Расчётка" -F files=@spec.xlsx

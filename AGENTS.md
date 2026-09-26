@@ -28,6 +28,7 @@ app/views/harness_page.py   «Харнес»: утверждение, прави
 app/views/quality.py        «Качество»: статистика по менеджерам
 app/views/onboarding.py     «Новому сотруднику»: чек-лист, учебный чат
 app/views/admin.py          «Настройки»: обновление, ключ DeepSeek, пользователи
+app/views/api_access.py     «Доступ к API»: личные токены (store.api_tokens, в базе — хэш)
 app/views/updates.py        кнопка «Обновить сайт» и статус обновления (логика — src/ameri/updates.py)
 app/views/about.py, howto.py  статьи из docs/site/*.md
 src/ameri/store.py          SQLite: chats, messages, attachments, feedback, onboarding; миграции
