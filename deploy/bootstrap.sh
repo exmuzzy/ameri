@@ -45,11 +45,13 @@ fi
 if [ ! -f "$ROOT/data/users.toml" ]; then
   PASSWORD="${AMERI_ADMIN_PASSWORD:-$(python3 -c 'import secrets; print(secrets.token_urlsafe(12))')}"
   HASH=$(PASSWORD="$PASSWORD" python3 -c "import os,sys; sys.path.insert(0,'$ROOT/app/src'); from ameri.auth import hash_password; print(hash_password(os.environ['PASSWORD']))")
+  mkdir -p "$ROOT/data"
   printf '[users.admin]\nname = "Администратор"\nrole = "admin"\npassword_hash = "%s"\n' "$HASH" > "$ROOT/data/users.toml"
   chmod 600 "$ROOT/data/users.toml"
   if [ -z "${AMERI_ADMIN_PASSWORD:-}" ]; then
     echo "$PASSWORD" > /root/ameri-admin-password.txt && chmod 600 /root/ameri-admin-password.txt
     log "Пароль admin сохранён в /root/ameri-admin-password.txt"
+    ADMIN_NOTE="Логин: admin   Пароль: ${PASSWORD}"
   fi
 fi
 
@@ -68,3 +70,5 @@ log "Запуск"
 cd "$ROOT/app/deploy"
 docker compose up -d --build
 log "Готово: https://${SITE_ADDRESS}"
+[ -n "${ADMIN_NOTE:-}" ] && log "$ADMIN_NOTE"
+log "Ключ DeepSeek вставьте на странице «Настройки» под admin."

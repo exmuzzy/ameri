@@ -6,6 +6,11 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     restart: unless-stopped
+    environment:
+      # Харнес — рабочая копия репозитория на томе /data: утверждённые правила переживают пересборку.
+      # Чтобы правила уходили в GitHub, задайте в deploy/.env AMERI_GIT_URL с токеном и AMERI_GIT_PUSH=1.
+      AMERI_GIT_URL: ${AMERI_GIT_URL:-https://github.com/exmuzzy/ameri.git}
+      AMERI_GIT_PUSH: ${AMERI_GIT_PUSH:-0}
     volumes:
       - /srv/ameri/data:/data
       - /srv/ameri/duct-calc:/duct-calc:ro
