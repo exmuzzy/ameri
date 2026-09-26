@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .llm import DeepSeekChat, key_problem
+from .materials import Material, find_sections, sections_context
 from .store import Attachment, Message, Usage
 
 TEXT_SUFFIXES = {".md", ".txt", ".csv"}
@@ -119,11 +120,14 @@ def ask_assistant(
     history: list[Message],
     duct_calc_dir: Path | None,
     names: dict[str, str],
+    materials: list[Material] | None = None,
 ) -> ActionResult:
     """Свободный вопрос: переписка Чата с текстом вложений в пределах бюджета.
 
     Системный промпт (Харнес) идёт первым и одинаков для всех Чатов — это
-    кэшируемый префикс DeepSeek; переписка добавляется после него.
+    кэшируемый префикс DeepSeek; переписка добавляется после него. Разделы Материалов
+    отрасли, подходящие к двум последним вопросам, дописываются в конец последнего
+    сообщения пользователя: так они не сдвигают кэшируемое начало запроса.
     """
 
     turns: list[dict[str, str]] = []
@@ -147,6 +151,15 @@ def ask_assistant(
     kept.reverse()
     if len(kept) < len(turns):
         kept.insert(0, {"role": "user", "content": f"[Ранние сообщения чата ({len(turns) - len(kept)}) опущены из-за длины.]"})
+
+    questions = [m.content for m in history if m.role == "user"][-2:]
+    sections = find_sections(materials or [], "\n".join(questions))
+    if sections:
+        reference = sections_context(sections)
+        if kept and kept[-1]["role"] == "user":
+            kept[-1] = {"role": "user", "content": kept[-1]["content"] + "\n\n" + reference}
+        else:
+            kept.append({"role": "user", "content": reference})
 
     text, usage = llm.complete([{"role": "system", "content": system_prompt}, *kept])
     return ActionResult(text=text, usage=usage)

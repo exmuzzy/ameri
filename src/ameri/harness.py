@@ -62,11 +62,13 @@ def list_examples(harness_dir: Path) -> list[HarnessFile]:
 
 
 def assistant_prompt(harness_dir: Path) -> str:
-    """Системный промпт: основной текст, затем Правила, затем Примеры.
+    """Системный промпт: основной текст, затем Правила, Примеры и оглавление Материалов отрасли.
 
     Порядок стабилен и не зависит от Чата: DeepSeek кэширует одинаковый префикс
     запросов, поэтому неизменная часть Харнеса дешевле при каждом следующем вызове.
     """
+
+    from .materials import materials_index
 
     parts = [(harness_dir / PROMPT_FILE).read_text(encoding="utf-8").strip()]
     rules = list_rules(harness_dir)
@@ -75,6 +77,7 @@ def assistant_prompt(harness_dir: Path) -> str:
     examples = list_examples(harness_dir)
     if examples:
         parts.append("## Примеры правильных ответов\n\n" + "\n\n".join(e.text for e in examples))
+    parts.append(materials_index(harness_dir))
     return "\n\n".join(part for part in parts if part)
 
 

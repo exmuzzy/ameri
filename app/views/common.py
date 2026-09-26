@@ -6,6 +6,7 @@ import streamlit as st
 
 from ameri.auth import User, load_users
 from ameri.harness import Access, load_access
+from ameri.materials import Material, load_materials
 from ameri.settings import Settings, load_settings
 from ameri.store import Store
 
@@ -29,6 +30,11 @@ def get_users() -> dict[str, User]:
 @st.cache_data(ttl=60)
 def get_access() -> Access:
     return load_access(get_settings().harness_dir)
+
+
+@st.cache_data(ttl=60)
+def get_materials() -> list[Material]:
+    return load_materials(get_settings().harness_dir)
 
 
 def current_user() -> User:
