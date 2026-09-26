@@ -140,8 +140,9 @@ python tools/run_evals.py --no-harness      # для сравнения — бе
 | `GET /api/v1/files/{attachment_id}` | скачать вложение или расчётку | кто видит чат |
 | `POST /api/v1/messages/{id}/feedback {rating, comment?, corrected_text?, rule_text?, as_example?}` | 👍/👎 или «Исправить и научить»: с `corrected_text` в чат добавляется «Исправление руководителя», правило ждёт утверждения на странице «Харнес» | `feedback.review` |
 | `GET /api/v1/users`, `POST /api/v1/users {login, name, role, password}`, `DELETE /api/v1/users/{login}` | пользователи — как форма в «Настройках» | только `admin` |
+| `POST /api/v1/update`, `GET /api/v1/update` | «Обновить сайт из репозитория» и статус обновления (`status.state`: `running` / `done` / `error`, `status.commit`) | `admin` и `harness.edit` |
 
-Остальные запросы — с заголовком `Authorization: Bearer <token>`. Токен подписан секретом `data/secrets/api_secret` (создаётся при первом запуске); смена пароля или удаление пользователя отзывает его токены. Утверждения правил, ключа DeepSeek и обновления сайта в API нет — только на сайте.
+Остальные запросы — с заголовком `Authorization: Bearer <token>`. Токен подписан секретом `data/secrets/api_secret` (создаётся при первом запуске); смена пароля или удаление пользователя отзывает его токены. Утверждения правил и ключа DeepSeek в API нет — только на сайте.
 
 ```bash
 TOKEN=$(curl -s https://<сайт>/api/v1/login -H 'content-type: application/json' \

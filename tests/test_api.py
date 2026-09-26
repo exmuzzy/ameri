@@ -244,3 +244,22 @@ def test_site_and_api_share_send_function():
     assert chats.chat_service is api.chat_service
     assert "save_user(" in inspect.getsource(admin._users_section)
     assert "delete_user(" in inspect.getsource(admin._users_section)
+
+
+def test_update_request_like_the_button(env, monkeypatch):
+    client, settings = env
+    from ameri import updates
+    from ameri.harness import HarnessRepo
+
+    monkeypatch.setattr(HarnessRepo, "pull", lambda self: "Харнес обновлён")
+    assert client.post("/api/v1/update", headers=login(client, "anna")).status_code == 403
+    (settings.data_dir / "update-status.json").write_text('{"state": "done", "commit": "abc"}', encoding="utf-8")
+    for name in ("root", "boss"):
+        response = client.post("/api/v1/update", headers=login(client, name))
+        assert response.status_code == 202
+        assert response.json()["harness"] == "Харнес обновлён"
+    assert (settings.data_dir / "update-request").read_text(encoding="utf-8") == "Руководитель"
+    state = client.get("/api/v1/update", headers=login(client, "root")).json()
+    assert state == {"status": {"state": "done", "commit": "abc"}, "request_stale": False}
+    assert "request_update(" in inspect.getsource(__import__("views.updates", fromlist=["x"]).render_update_panel)
+    assert updates.STALE_REQUEST_SECONDS == 120

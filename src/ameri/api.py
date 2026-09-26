@@ -19,7 +19,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import actions, chat_service, users_service
+from . import actions, chat_service, updates, users_service
 from .auth import User, authenticate, load_users
 from .harness import Access, load_access
 from .settings import Settings, load_settings
@@ -354,6 +354,27 @@ def create_app(settings_factory=load_settings) -> FastAPI:
         )
         item = next(f for f in store.feedback_for_chat(chat.id)[message.id] if f.id == feedback_id)
         return {"feedback": _feedback_out(item), "correction": _message_out(correction) if correction else None}
+
+    def require_updater(access: Access, user: User) -> None:
+        # Кнопка «Обновить сайт» есть у администратора («Настройки») и у руководителя («Харнес»).
+        if user.role != "admin" and not access.can(user, "harness.edit"):
+            raise HTTPException(403, "Обновлять сайт может администратор или руководитель")
+
+    def update_out(settings: Settings) -> dict:
+        return {"status": updates.update_status(settings), "request_stale": updates.request_stale(settings)}
+
+    @app.get("/api/v1/update")
+    def update_state(user: UserDep, access: AccessDep, settings: SettingsDep) -> dict:
+        require_updater(access, user)
+        return update_out(settings)
+
+    @app.post("/api/v1/update", status_code=202)
+    def update_site(user: UserDep, access: AccessDep, settings: SettingsDep) -> dict:
+        """То же, что кнопка «Обновить сайт из репозитория»: итог — в GET /api/v1/update."""
+
+        require_updater(access, user)
+        pulled = updates.request_update(settings, user.name)
+        return {"harness": pulled, **update_out(settings)}
 
     @app.get("/api/v1/users")
     def list_users(user: UserDep, settings: SettingsDep) -> list[dict]:

@@ -1,9 +1,10 @@
 """Демо-чаты на рабочем сайте ameri через HTTP API (README → API).
 
 Сценарии — demo/scenarios.yaml, файлы — demo/specs/. Учётные данные — только из окружения:
-AMERI_ADMIN_LOGIN / AMERI_ADMIN_PASSWORD (для --setup-users), AMERI_DEMO_MANAGER_PASSWORD,
+AMERI_ADMIN_LOGIN / AMERI_ADMIN_PASSWORD (для --setup-users и --update-site), AMERI_DEMO_MANAGER_PASSWORD,
 AMERI_DEMO_LEADER_PASSWORD.
 
+    python tools/demo_via_api.py --update-site   # «Обновить сайт из репозитория» и дождаться итога (admin)
     python tools/demo_via_api.py --setup-users   # завести демо-пользователей или сменить им пароли
     python tools/demo_via_api.py                 # все сценарии (чат с таким названием уже есть — пропуск)
     python tools/demo_via_api.py --only 4        # один сценарий
@@ -76,6 +77,28 @@ def setup_users(api: Api, config: dict) -> None:
         body = {"login": user["login"], "name": user["name"], "role": user["role"], "password": env(user["password_env"])}
         api.request(admin, "POST", "/users", json=body)
         log(f"{user['login']}: {'пароль и имя обновлены' if user['login'] in existing else 'создан'} ({user['role']})")
+
+
+def update_site(api: Api) -> None:
+    admin = env("AMERI_ADMIN_LOGIN")
+    api.login(admin, env("AMERI_ADMIN_PASSWORD"))
+    before = api.get(admin, "/update")["status"].get("finished_at")
+    log("Харнес: " + api.request(admin, "POST", "/update").json()["harness"])
+    deadline = time.time() + 20 * 60
+    while time.time() < deadline:
+        time.sleep(15)
+        try:
+            state = api.get(admin, "/update")
+        except (httpx.HTTPError, RuntimeError) as error:  # сайт перезапускается
+            log(f"  жду: {error.__class__.__name__}")
+            continue
+        status = state["status"]
+        log(f"  {status.get('state')}: {status.get('message')} ({status.get('commit')})")
+        if state["request_stale"]:
+            sys.exit("Служба обновления на сервере не запущена (install-autoupdate.sh)")
+        if status.get("finished_at") != before and status.get("state") in ("done", "error"):
+            return
+    sys.exit("Обновление не закончилось за 20 минут")
 
 
 def last_answer(api: Api, who: str, chat_id: int) -> dict | None:
@@ -172,6 +195,7 @@ def report(api: Api, users: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--url", default=os.environ.get("AMERI_URL", DEFAULT_URL))
+    parser.add_argument("--update-site", action="store_true")
     parser.add_argument("--setup-users", action="store_true")
     parser.add_argument("--only", type=int, help="номер сценария")
     parser.add_argument("--followup", action="store_true")
@@ -180,6 +204,9 @@ def main() -> None:
 
     config = load_scenarios()
     api = Api(args.url)
+    if args.update_site:
+        update_site(api)
+        return
     if args.setup_users:
         setup_users(api, config)
         return

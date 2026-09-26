@@ -28,7 +28,7 @@ app/views/harness_page.py   «Харнес»: утверждение, прави
 app/views/quality.py        «Качество»: статистика по менеджерам
 app/views/onboarding.py     «Новому сотруднику»: чек-лист, учебный чат
 app/views/admin.py          «Настройки»: обновление, ключ DeepSeek, пользователи
-app/views/updates.py        кнопка «Обновить сайт» и статус обновления
+app/views/updates.py        кнопка «Обновить сайт» и статус обновления (логика — src/ameri/updates.py)
 app/views/about.py, howto.py  статьи из docs/site/*.md
 src/ameri/store.py          SQLite: chats, messages, attachments, feedback, onboarding; миграции
 src/ameri/auth.py           users.toml, scrypt-хэши, save_users
@@ -67,10 +67,10 @@ DEEPSEEK_API_KEY=... AMERI_DUCT_CALC_DIR=/путь/к/duct-calc python tools/run
 - **Новый эталон** — `harness/evals/<имя>/spec.*` (реальный файл без персональных данных, метаданные очищены) + `expected.yaml` (`line`, `type`, `red`). См. `harness/evals/README.md`.
 - **Новая статья** — `docs/site/<имя>.md` + `st.Page` в `app/main.py` (функция-рендер в `app/views/howto.py`).
 - **Новое действие в чате** — функция в `src/ameri/actions.py`, возвращающая `ActionResult`; константа, ключ API и грант в `src/ameri/chat_service.py` (`ACTION_KEYS`, `ACTION_GRANTS`, `available_actions`, `run_action`); грант в `harness/access.yaml`. Сайт и API подхватят его сами.
-- **Новый запрос API** — в `src/ameri/api.py` только поверх функций ядра (`chat_service`, `users_service`, `Store`), права — `Access.can`; тест в `tests/test_api.py`. Эндпоинтов для утверждения харнеса, ключа DeepSeek и обновления сайта не добавляем.
+- **Новый запрос API** — в `src/ameri/api.py` только поверх функций ядра (`chat_service`, `users_service`, `Store`), права — `Access.can`; тест в `tests/test_api.py`. Эндпоинтов для утверждения харнеса и ключа DeepSeek не добавляем.
 - **Работа на рабочем сайте из облачной сессии** — браузер не подойдёт (прокси не пропускает WebSocket Streamlit); используйте API, пример — `tools/demo_via_api.py`.
 - **Новая колонка в базе** — добавь в `SCHEMA` (с `DEFAULT`, если NOT NULL), миграция применится сама; тест на старую базу — по образцу `test_migration_adds_new_columns_and_keeps_data`.
-- **Выкатить** — push в `master`, затем на сайте «Обновить сайт» (или `ssh root@159.194.254.146 /srv/ameri/app/deploy/autoupdate.sh`). Харнес и `docs/` — без перезапуска; код — пересборка с копией базы.
+- **Выкатить** — push в `master`, затем на сайте «Обновить сайт» или `POST /api/v1/update` (`tools/demo_via_api.py --update-site`) (или `ssh root@159.194.254.146 /srv/ameri/app/deploy/autoupdate.sh`). Харнес и `docs/` — без перезапуска; код — пересборка с копией базы.
 
 ## Сервер (VPS Beget)
 
