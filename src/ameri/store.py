@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import re
+import secrets
 import shutil
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -60,6 +61,16 @@ CREATE TABLE IF NOT EXISTS onboarding (
     step TEXT NOT NULL,
     done_at TEXT NOT NULL,
     PRIMARY KEY (login, step)
+);
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id INTEGER PRIMARY KEY,
+    login TEXT NOT NULL,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    last_used_at TEXT,
+    revoked_at TEXT
 );
 CREATE INDEX IF NOT EXISTS messages_chat ON messages(chat_id, id);
 CREATE INDEX IF NOT EXISTS feedback_message ON feedback(message_id);
@@ -127,6 +138,28 @@ class Usage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cache_hit_tokens: int = 0
+
+
+@dataclass(frozen=True)
+class ApiToken:
+    id: int
+    login: str
+    name: str
+    created_at: str
+    expires_at: str | None
+    last_used_at: str | None
+    revoked_at: str | None
+
+    @property
+    def active(self) -> bool:
+        return self.revoked_at is None and (self.expires_at is None or self.expires_at > _now())
+
+
+API_TOKEN_PREFIX = "ameri_"
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -429,6 +462,49 @@ class Store:
             row["dislikes"] = extra.get("dislikes") or 0
             row["corrections"] = extra.get("corrections") or 0
         return rows
+
+    # --- Личные токены API (создаются на странице «Доступ к API») ---
+
+    def create_api_token(self, login: str, name: str, days: int | None) -> tuple[str, ApiToken]:
+        """Новый токен: полностью показывается один раз, в базе хранится только его хэш."""
+
+        token = API_TOKEN_PREFIX + secrets.token_urlsafe(32)
+        now = datetime.now(timezone.utc)
+        expires = (now + timedelta(days=days)).isoformat(timespec="seconds") if days else None
+        with self._connect() as db:
+            cursor = db.execute(
+                "INSERT INTO api_tokens (login, name, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+                (login, name.strip() or "Токен", _token_hash(token), now.isoformat(timespec="seconds"), expires),
+            )
+            token_id = int(cursor.lastrowid)
+        return token, next(t for t in self.list_api_tokens(login) if t.id == token_id)
+
+    def list_api_tokens(self, login: str | None = None) -> list[ApiToken]:
+        sql = "SELECT id, login, name, created_at, expires_at, last_used_at, revoked_at FROM api_tokens"
+        params: list[object] = []
+        if login is not None:
+            sql += " WHERE login = ?"
+            params.append(login)
+        with self._connect() as db:
+            return [ApiToken(**dict(row)) for row in db.execute(sql + " ORDER BY id DESC", params)]
+
+    def revoke_api_token(self, token_id: int) -> None:
+        with self._connect() as db:
+            db.execute("UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL", (_now(), token_id))
+
+    def api_token_login(self, token: str) -> str | None:
+        """Логин владельца действующего токена; отмечает время использования."""
+
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT id, login, name, created_at, expires_at, last_used_at, revoked_at FROM api_tokens "
+                "WHERE token_hash = ?",
+                (_token_hash(token),),
+            ).fetchone()
+            if row is None or not ApiToken(**dict(row)).active:
+                return None
+            db.execute("UPDATE api_tokens SET last_used_at = ? WHERE id = ?", (_now(), row["id"]))
+            return row["login"]
 
     # --- Онбординг ---
 

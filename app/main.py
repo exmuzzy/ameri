@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ameri.auth import authenticate  # noqa: E402
 from ameri.materials import PAGE_PATH as MATERIALS_PATH  # noqa: E402
-from views import about, admin, chats, harness_page, howto, materials, onboarding, quality  # noqa: E402
+from views import about, admin, api_access, chats, harness_page, howto, materials, onboarding, quality  # noqa: E402
 from views.common import get_access  # noqa: E402
 from views.common import get_users  # noqa: E402
 from views.theme import STATIC, apply_theme  # noqa: E402
@@ -71,6 +71,7 @@ work = [
     st.Page(howto.render, title="Как работать", icon=":material/menu_book:", url_path="howto"),
     st.Page(howto.render_examples, title="Примеры работы", icon=":material/description:", url_path="examples"),
     materials_page,
+    st.Page(api_access.render, title="Доступ к API", icon=":material/key:", url_path="api"),
 ]
 lead = []
 if access.can(user, "stats.view"):
