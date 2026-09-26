@@ -1,0 +1,19 @@
+title: Прямоугольная система на фланцах (docx, вымышленная)
+source: вымышленная спецификация; «короб», «утка», «врезка», «фланец20», «м2», покупное по маркам — по docs/industry-research.md
+connection: flange
+positions:
+  - {line: "Система П1", red: false, type: null}
+  - {line: "Короб ПП 600х300", red: false, type: straight_rect}
+  - {line: "Воздуховод прямоугольный ПП 600х300х5", red: false, type: straight_rect}
+  - {line: "Отвод 90° 600х300", red: false}
+  - {line: "Переход 600х300/Ø400", red: false, type: transition_rect_round}
+  - {line: "Утка 600х300", red: true}
+  - {line: "Врезка Ø250", red: true}
+  - {line: "Решётка жалюзийная ПП 600х300", red: false}
+  - {line: "Дроссель-клапан ПП 600х300", red: false}
+  - {line: "Клапан огнезадерживающий КПУ-1М", red: false}
+  - {line: "Шумоглушитель ГТК", red: false}
+  - {line: "Шкаф управления", red: false}
+  - {line: "Система В3", red: false, type: null}
+  - {line: "Зонт вытяжной над ванной", red: true}
+  - {line: "с учётом фасонных изделий", red: true}
