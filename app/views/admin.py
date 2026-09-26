@@ -5,6 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 from ameri.auth import ROLES, load_users
+from ameri.llm import key_problem
 from ameri.users_service import UserError, delete_user, save_user
 
 from views.common import get_settings, get_users
@@ -20,10 +21,17 @@ def _key_section() -> None:
         st.success("Ключ задан переменной окружения на сервере.")
         return
     st.caption("Ключ хранится только на сервере, в файле с доступом для владельца. На странице он не показывается.")
-    st.write("Статус: " + ("ключ задан" if settings.api_key() else "ключ не задан"))
+    current = settings.api_key()
+    if current and key_problem(current):
+        st.error("Сохранённый ключ содержит недопустимые символы (кириллицу или пробелы): вставьте ключ заново.")
+    else:
+        st.write("Статус: " + ("ключ задан" if current else "ключ не задан"))
     with st.form("api_key", clear_on_submit=True):
         key = st.text_input("Новый ключ", type="password", placeholder="sk-…")
         if st.form_submit_button("Сохранить ключ", type="primary") and key.strip():
+            if key_problem(key.strip()):
+                st.error("Ключ — латиница и цифры без пробелов (вида sk-…). Скопируйте его из кабинета DeepSeek заново.")
+                return
             settings.save_api_key(key)
             st.success("Ключ сохранён.")
 

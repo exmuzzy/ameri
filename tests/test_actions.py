@@ -87,3 +87,14 @@ def test_odt_text(tmp_path):
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("content.xml", content)
     assert actions.odt_text(path) == "Тема: Воздуховоды\nВоздуховод ПП ф160 L1000 | 2 | шт"
+
+
+def test_non_ascii_key_gives_clear_message():
+    import pytest
+    from ameri.llm import BAD_KEY_MESSAGE, DeepSeekChat, LlmError, key_problem
+
+    assert key_problem("sk-abc123") is None
+    assert key_problem("sk-ключ") == BAD_KEY_MESSAGE
+    assert key_problem("sk-abc 123") == BAD_KEY_MESSAGE
+    with pytest.raises(LlmError, match="недопустимые символы"):
+        DeepSeekChat(base_url="https://x", api_key="sk-вставьте ключ", model="m")

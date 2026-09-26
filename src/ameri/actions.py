@@ -11,7 +11,7 @@ import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .llm import DeepSeekChat
+from .llm import DeepSeekChat, key_problem
 from .store import Attachment, Message, Usage
 
 TEXT_SUFFIXES = {".md", ".txt", ".csv"}
@@ -205,8 +205,9 @@ def duct_calc(
 ) -> ActionResult:
     """Расчётка воздуховодов по вложенной Спецификации (прототип duct-calc)."""
 
-    if not api_key:
-        return ActionResult(text="Ключ DeepSeek не задан: Администратору нужно добавить его на сервер.")
+    problem = key_problem(api_key)
+    if problem:
+        return ActionResult(text=problem)
     _import_duct_calc(duct_calc_dir)
     _install_harness(harness_dir)
     from duct_calc.model_client import DeepSeekClient, ModelClientConfig

@@ -11,6 +11,22 @@ class LlmError(RuntimeError):
     """Понятная пользователю ошибка обращения к модели."""
 
 
+BAD_KEY_MESSAGE = (
+    "Ключ DeepSeek на сервере содержит недопустимые символы (кириллицу или пробелы): "
+    "Администратору нужно заново вставить ключ в «Настройках»."
+)
+
+
+def key_problem(api_key: str) -> str | None:
+    """Почему ключ нельзя отправить в заголовке HTTP (там допустим только ASCII без пробелов)."""
+
+    if not api_key:
+        return "Ключ DeepSeek не задан: Администратору нужно добавить его на сервер."
+    if not api_key.isascii() or any(ch.isspace() for ch in api_key):
+        return BAD_KEY_MESSAGE
+    return None
+
+
 class DeepSeekChat:
     def __init__(
         self,
@@ -21,8 +37,9 @@ class DeepSeekChat:
         timeout_seconds: float = 180,
         http_client: httpx.Client | None = None,
     ) -> None:
-        if not api_key:
-            raise LlmError("Ключ DeepSeek не задан: Администратору нужно добавить его на сервер.")
+        problem = key_problem(api_key)
+        if problem:
+            raise LlmError(problem)
         self.endpoint = base_url.rstrip("/") + "/chat/completions"
         self.api_key = api_key
         self.model = model
