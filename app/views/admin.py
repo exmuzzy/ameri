@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import re
-
 import streamlit as st
 
-from ameri.auth import ROLES, User, hash_password, load_users, save_users
+from ameri.auth import ROLES, load_users
+from ameri.users_service import UserError, delete_user, save_user
 
 from views.common import get_settings, get_users
 from views.updates import render_update_panel
@@ -45,24 +44,20 @@ def _users_section() -> None:
         role = st.selectbox("Роль", ROLES, index=2, format_func=ROLE_TITLES.get)
         password = st.text_input("Пароль (не короче 8 символов)", type="password")
         if st.form_submit_button("Сохранить", type="primary"):
-            login = login.strip().lower()
-            if not re.fullmatch(r"[a-z0-9._-]{2,32}", login):
-                st.error("Логин: 2–32 символа, латиница, цифры, точка, дефис, подчёркивание.")
-            elif len(password) < 8:
-                st.error("Пароль не короче 8 символов.")
+            try:
+                saved = save_user(settings.users_file, login, name, role, password)
+            except UserError as error:
+                st.error(str(error))
             else:
-                users[login] = User(login, name.strip() or login, role, hash_password(password))
-                save_users(settings.users_file, users)
                 get_users.clear()
-                st.success(f"Пользователь {login} сохранён.")
+                st.success(f"Пользователь {saved.login} сохранён.")
                 st.rerun()
     removable = [u for u in users if u != st.session_state["user"].login]
     if removable:
         with st.form("remove"):
             victim = st.selectbox("Удалить пользователя", removable)
             if st.form_submit_button("Удалить"):
-                users.pop(victim)
-                save_users(settings.users_file, users)
+                delete_user(settings.users_file, victim, st.session_state["user"])
                 get_users.clear()
                 st.rerun()
 

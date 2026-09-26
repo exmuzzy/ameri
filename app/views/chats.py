@@ -2,31 +2,24 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import streamlit as st
 
-from ameri import actions
-from ameri.harness import HarnessRepo, assistant_prompt
-from ameri.llm import DeepSeekChat, LlmError
+from ameri import actions, chat_service
+from ameri.chat_service import ACTION_DUCT, ACTION_NOTE
 from ameri.store import Chat, Feedback, Message
 
 from views.common import current_user, display_name, get_access, get_settings, get_store, get_users
 
-ACTION_ASK = "Вопрос ассистенту"
-ACTION_DUCT = "Расчётка воздуховодов"
-ACTION_NOTE = "Без ассистента"
 
 
 def _visible_chats(query: str, author: str | None) -> list[Chat]:
-    user = current_user()
-    store = get_store()
-    if get_access().can(user, "chat.view_all"):
-        return store.list_chats(owner=author, query=query)
-    return store.list_chats(owner=user.login, query=query)
+    return chat_service.visible_chats(get_store(), get_access(), current_user(), query, author)
 
 
 def _can_open(chat: Chat) -> bool:
-    user = current_user()
-    return chat.owner == user.login or get_access().can(user, "chat.view_all")
+    return chat_service.can_open(get_access(), current_user(), chat)
 
 
 def _select(chat_id: int) -> None:
@@ -105,17 +98,16 @@ def _review_controls(chat: Chat, message: Message) -> None:
             )
             as_example = st.checkbox("Сохранить вопрос и правильный ответ как пример для ассистента")
             if st.form_submit_button("Исправить", type="primary"):
-                store.add_feedback(
-                    message.id,
-                    reviewer=user.login,
+                chat_service.review_message(
+                    store,
+                    chat,
+                    message,
+                    user,
                     rating=-1,
                     comment=comment,
                     corrected_text=corrected,
                     rule_text=rule,
                     as_example=as_example,
-                )
-                store.add_message(
-                    chat.id, author=user.login, role="assistant", content=corrected, action="Исправление руководителя"
                 )
                 if rule.strip() or as_example:
                     st.toast("Исправление отправлено в чат; правило ждёт утверждения на странице «Харнес».")
@@ -144,55 +136,6 @@ def _render_message(chat: Chat, message: Message, feedback: list[Feedback], can_
             _review_controls(chat, message)
 
 
-def _run_action(chat: Chat, message: Message, action: str, connection: str | None) -> None:
-    settings = get_settings()
-    store = get_store()
-    try:
-        if action == ACTION_DUCT:
-            specs = [a for a in message.attachments if a.path.suffix.lower() in actions.DUCT_SUFFIXES]
-            if not specs:
-                result = actions.ActionResult(
-                    "Для расчётки приложите файл спецификации: .md, .xlsx, .docx, .doc, .odt или .csv."
-                )
-            else:
-                result = actions.duct_calc(
-                    spec=specs[0],
-                    connection_label=connection or "Без соединения",
-                    duct_calc_dir=settings.duct_calc_dir,
-                    base_url=settings.deepseek_base_url,
-                    api_key=settings.api_key(),
-                    model=settings.deepseek_model,
-                    harness_dir=settings.harness_dir,
-                )
-        else:
-            llm = DeepSeekChat(
-                base_url=settings.deepseek_base_url,
-                api_key=settings.api_key(),
-                model=settings.deepseek_model,
-            )
-            result = actions.ask_assistant(
-                llm,
-                assistant_prompt(settings.harness_dir),
-                store.messages(chat.id),
-                settings.duct_calc_dir,
-                {login: user.name for login, user in get_users().items()},
-            )
-    except LlmError as error:
-        result = actions.ActionResult(f"Не получилось обратиться к модели: {error}")
-    except Exception as error:  # noqa: BLE001 - ошибка показывается в чате и не роняет страницу
-        result = actions.ActionResult(f"Действие завершилось ошибкой: {error.__class__.__name__}: {error}")
-    store.add_message(
-        chat.id,
-        author="assistant",
-        role="assistant",
-        content=result.text,
-        action=action,
-        files=result.files,
-        usage=result.usage,
-        harness_version=HarnessRepo(settings.harness_dir).version(),
-    )
-
-
 def _chat_column(chat: Chat) -> None:
     user = current_user()
     access = get_access()
@@ -205,12 +148,7 @@ def _chat_column(chat: Chat) -> None:
     for message in get_store().messages(chat.id):
         _render_message(chat, message, feedback.get(message.id, []), can_review)
 
-    options = []
-    if access.can(user, "action.ask"):
-        options.append(ACTION_ASK)
-    if access.can(user, "action.duct_calc") and actions.duct_calc_available(settings.duct_calc_dir):
-        options.append(ACTION_DUCT)
-    options.append(ACTION_NOTE)
+    options = chat_service.available_actions(access, user, settings)
     left, right = st.columns([2, 1])
     action = left.radio("Действие", options, horizontal=True)
     connection = None
@@ -223,22 +161,21 @@ def _chat_column(chat: Chat) -> None:
         file_type=["md", "txt", "csv", "xlsx", "docx", "doc", "odt", "pdf", "png", "jpg", "jpeg"],
     )
     if submitted:
-        text = (submitted.text or "").strip()
         files = [(f.name, f.getvalue()) for f in submitted.files]
-        if not text and not files:
-            return
-        message = get_store().add_message(
-            chat.id,
-            author=user.login,
-            role="user",
-            content=text or "(файлы)",
-            action=None if action == ACTION_NOTE else action,
-            files=files,
-        )
-        if action != ACTION_NOTE:
-            with st.spinner("Ассистент работает…"):
-                _run_action(chat, message, action, connection)
-        st.rerun()
+        with st.spinner("Ассистент работает…") if action != ACTION_NOTE else nullcontext():
+            posted = chat_service.post_message(
+                get_store(),
+                settings,
+                user,
+                chat,
+                text=submitted.text or "",
+                action=action,
+                connection=connection,
+                files=files,
+                names={login: u.name for login, u in get_users().items()},
+            )
+        if posted is not None:
+            st.rerun()
 
 
 def render() -> None:
