@@ -34,6 +34,9 @@ src/ameri/store.py          SQLite: chats, messages, attachments, feedback, onbo
 src/ameri/auth.py           users.toml, scrypt-хэши, save_users
 src/ameri/harness.py        access.yaml, assistant_prompt, HarnessRepo (правила, примеры, git commit/pull/push)
 src/ameri/llm.py            DeepSeekChat: OpenAI-совместимый API, usage с cache hit, ретрай
+src/ameri/chat_service.py   отправка сообщения и «Исправить и научить» — общее для сайта и API
+src/ameri/users_service.py  пользователи: проверки формы «Настройки», сохранение, удаление
+src/ameri/api.py            HTTP API /api/v1 (FastAPI, uvicorn :8000): токены, чаты, файлы, оценки, пользователи
 src/ameri/actions.py        «Вопрос ассистенту», «Расчётка» (обёртка прототипа), .odt, подключение harness/duct_calc
 src/ameri/settings.py       переменные окружения, ключ DeepSeek из env или data/secrets
 harness/                    access.yaml, prompts/, rules/, examples/, duct_calc/, evals/
@@ -41,6 +44,7 @@ docs/site/*.md              статьи сайта (О проекте, Как �
 deploy/                     Dockerfile, docker-compose.yml, Caddyfile, entrypoint.sh, bootstrap.sh,
                             beget.sh, autoupdate.sh, install-autoupdate.sh, shared-host/ (bishkek)
 tools/run_evals.py          прогон эталонов; tools/hash_password.py — хэш пароля
+tools/demo_via_api.py       демо-чаты на рабочем сайте через API (данные — demo/)
 tests/                      pytest
 ```
 
@@ -50,6 +54,7 @@ tests/                      pytest
 pip install -r requirements.txt
 python -m pytest -q                        # обязательно перед каждым push
 streamlit run app/main.py                  # нужен var/users.toml (см. README → Локальная разработка)
+uvicorn --app-dir src ameri.api:app --port 8000   # HTTP API (README → API)
 DEEPSEEK_API_KEY=... AMERI_DUCT_CALC_DIR=/путь/к/duct-calc python tools/run_evals.py   # при изменении harness/duct_calc
 ```
 
@@ -61,14 +66,16 @@ DEEPSEEK_API_KEY=... AMERI_DUCT_CALC_DIR=/путь/к/duct-calc python tools/run
 - **Правило разбора спецификаций** — абзац в `harness/duct_calc/parse_rules.md` (дописывается к промпту прототипа через `actions._install_harness`); ключевые слова покупных позиций, решёток, клапанов — `harness/duct_calc/params.yaml`. Затем `tools/run_evals.py` и сравнение с `--no-harness`.
 - **Новый эталон** — `harness/evals/<имя>/spec.*` (реальный файл без персональных данных, метаданные очищены) + `expected.yaml` (`line`, `type`, `red`). См. `harness/evals/README.md`.
 - **Новая статья** — `docs/site/<имя>.md` + `st.Page` в `app/main.py` (функция-рендер в `app/views/howto.py`).
-- **Новое действие в чате** — функция в `src/ameri/actions.py`, возвращающая `ActionResult`; пункт в `app/views/chats.py` (`options`, `_run_action`); грант в `harness/access.yaml`.
+- **Новое действие в чате** — функция в `src/ameri/actions.py`, возвращающая `ActionResult`; константа, ключ API и грант в `src/ameri/chat_service.py` (`ACTION_KEYS`, `ACTION_GRANTS`, `available_actions`, `run_action`); грант в `harness/access.yaml`. Сайт и API подхватят его сами.
+- **Новый запрос API** — в `src/ameri/api.py` только поверх функций ядра (`chat_service`, `users_service`, `Store`), права — `Access.can`; тест в `tests/test_api.py`. Эндпоинтов для утверждения харнеса, ключа DeepSeek и обновления сайта не добавляем.
+- **Работа на рабочем сайте из облачной сессии** — браузер не подойдёт (прокси не пропускает WebSocket Streamlit); используйте API, пример — `tools/demo_via_api.py`.
 - **Новая колонка в базе** — добавь в `SCHEMA` (с `DEFAULT`, если NOT NULL), миграция применится сама; тест на старую базу — по образцу `test_migration_adds_new_columns_and_keeps_data`.
 - **Выкатить** — push в `master`, затем на сайте «Обновить сайт» (или `ssh root@159.194.254.146 /srv/ameri/app/deploy/autoupdate.sh`). Харнес и `docs/` — без перезапуска; код — пересборка с копией базы.
 
 ## Сервер (VPS Beget)
 
 - `/srv/ameri/app` — клон репозитория; `/srv/ameri/data` — данные (база `ameri.sqlite3`, `files/`, `users.toml`, `secrets/`, `repo/` — рабочая копия харнеса и статей, из которой читает сайт); `/srv/ameri/duct-calc` — прототип; `/srv/ameri/backups` — копии.
-- Docker compose проект `ameri` в `deploy/`: `app` (Streamlit :8501) + `caddy` (80/443). Обновление — systemd `ameri-update.path` → `deploy/autoupdate.sh`, журнал `/var/log/ameri-update.log`, статус `data/update-status.json`.
+- Docker compose проект `ameri` в `deploy/`: `app` (Streamlit :8501 + API :8000) + `caddy` (80/443, `/api/*` → :8000). Обновление — systemd `ameri-update.path` → `deploy/autoupdate.sh`, журнал `/var/log/ameri-update.log`, статус `data/update-status.json`.
 - Не запускай `docker system prune`, не удаляй `/srv/ameri/data`, не меняй файрвол без просьбы.
 
 ## Подводные камни

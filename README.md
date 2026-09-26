@@ -125,6 +125,36 @@ python tools/run_evals.py --no-harness      # для сравнения — бе
 
 ---
 
+## API
+
+Кроме страниц, сайт отвечает по HTTP на `https://<сайт>/api/v1/...` — для скриптов и агентов (например, облачных сессий Claude Code, у которых нет WebSocket для Streamlit). API делает **то же, что кнопки на сайте**, теми же функциями ядра (`ameri.chat_service`, `ameri.users_service`) и с теми же правами (`harness/access.yaml`). Описание в формате OpenAPI — `/api/docs`.
+
+| Запрос | Что делает | Кому |
+|---|---|---|
+| `POST /api/v1/login {login, password}` | токен на 12 часов: `{token, expires_at}` | всем; после 5 неудач за 15 минут — 429 |
+| `GET /api/v1/me` | логин, имя, роль, гранты, доступные действия | всем |
+| `GET /api/v1/chats?query=&author=` | видимые чаты | менеджер — свои, `chat.view_all` — все |
+| `POST /api/v1/chats {title}` | новый чат | `chat.create` |
+| `GET /api/v1/chats/{id}/messages` | сообщения с вложениями (id, имя, размер) и оценками | автор чата и `chat.view_all` |
+| `POST /api/v1/chats/{id}/messages` | multipart: `text`, `action` = `ask` \| `duct_calc` \| `note`, `connection` = `flange` \| `socket` \| `none`, `files` (можно несколько); ответ — сообщение пользователя и ассистента | как на сайте |
+| `GET /api/v1/files/{attachment_id}` | скачать вложение или расчётку | кто видит чат |
+| `POST /api/v1/messages/{id}/feedback {rating, comment?, corrected_text?, rule_text?, as_example?}` | 👍/👎 или «Исправить и научить»: с `corrected_text` в чат добавляется «Исправление руководителя», правило ждёт утверждения на странице «Харнес» | `feedback.review` |
+| `GET /api/v1/users`, `POST /api/v1/users {login, name, role, password}`, `DELETE /api/v1/users/{login}` | пользователи — как форма в «Настройках» | только `admin` |
+
+Остальные запросы — с заголовком `Authorization: Bearer <token>`. Токен подписан секретом `data/secrets/api_secret` (создаётся при первом запуске); смена пароля или удаление пользователя отзывает его токены. Утверждения правил, ключа DeepSeek и обновления сайта в API нет — только на сайте.
+
+```bash
+TOKEN=$(curl -s https://<сайт>/api/v1/login -H 'content-type: application/json' \
+  -d '{"login": "anna", "password": "..."}' | jq -r .token)
+curl -s https://<сайт>/api/v1/chats -H "Authorization: Bearer $TOKEN"
+curl -s https://<сайт>/api/v1/chats/12/messages -H "Authorization: Bearer $TOKEN" \
+  -F action=duct_calc -F connection=socket -F text="Расчётка" -F files=@spec.xlsx
+```
+
+Расчётка идёт несколько минут: держите таймаут клиента не меньше 10 минут (Caddy ждёт до 15). Пример клиента — `tools/demo_via_api.py`.
+
+---
+
 ## Сервер
 
 | | |
@@ -143,14 +173,14 @@ python tools/run_evals.py --no-harness      # для сравнения — бе
 │   ├── ameri.sqlite3          # чаты, сообщения, оценки, онбординг
 │   ├── files/                 # вложения и расчётки
 │   ├── users.toml             # пользователи (пароли — хэши scrypt), права 600
-│   ├── secrets/deepseek_api_key
+│   ├── secrets/deepseek_api_key, secrets/api_secret (подпись токенов API)
 │   ├── repo/                  # рабочая копия репозитория: из неё сайт читает харнес и статьи
 │   └── update-status.json     # итог последнего обновления
 ├── duct-calc/      # прототип расчётки (распакованный zip, в git его нет)
 └── backups/        # ночные архивы data (14 дней) и копии базы перед обновлениями (10 шт.)
 ```
 
-Сервисы (`deploy/docker-compose.yml`, проект `ameri`): **app** — Streamlit на порту 8501, образ `deploy/Dockerfile` с LibreOffice; **caddy** — HTTPS на 80/443. Кроме того, systemd-служба **ameri-update.path** ждёт заявку на обновление от кнопки на сайте и запускает `deploy/autoupdate.sh`.
+Сервисы (`deploy/docker-compose.yml`, проект `ameri`): **app** — Streamlit на порту 8501 и HTTP API (uvicorn) на 8000 в одном контейнере (`deploy/entrypoint.sh` следит за обоими; упал один — контейнер перезапускается), образ `deploy/Dockerfile` с LibreOffice; **caddy** — HTTPS на 80/443, `/api/*` → app:8000, остальное → app:8501. Кроме того, systemd-служба **ameri-update.path** ждёт заявку на обновление от кнопки на сайте и запускает `deploy/autoupdate.sh`.
 
 ### Установка с нуля
 
@@ -246,7 +276,7 @@ DEEPSEEK_API_KEY=... AMERI_DUCT_CALC_DIR=/путь/к/duct-calc streamlit run ap
 
 ## Что ещё не сделано
 
-- **API для инструментов руководителя** (`/api/v1`, `tools/ameri_cli.py`): чтобы ZCode/Cursor читали историю чатов напрямую. Сейчас историю смотрят на сайте.
+- **CLI для инструментов руководителя** (`tools/ameri_cli.py` поверх [API](#api)): отчёты «что делал менеджер за неделю» для ZCode/Cursor.
 - **Опрос настройки** — страница, где ассистент раундами расспрашивает руководителя и записывает ответы в харнес.
 - **Отправка харнеса в GitHub** — нужен токен записи (Q27).
 - **Проекты с участниками** — сейчас чат принадлежит автору и виден руководителям.
