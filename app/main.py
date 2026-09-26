@@ -11,7 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ameri.auth import authenticate  # noqa: E402
-from views import about, admin, chats, howto  # noqa: E402
+from views import about, admin, chats, harness_page, howto, onboarding, quality  # noqa: E402
+from views.common import get_access  # noqa: E402
 from views.common import get_users  # noqa: E402
 
 ROLE_TITLES = {"admin": "Администратор", "leader": "Руководитель", "manager": "Менеджер"}
@@ -47,12 +48,21 @@ with st.sidebar:
         st.session_state.clear()
         st.rerun()
 
-pages = [
-    st.Page(chats.render, title="Чаты", icon="💬", url_path="chats", default=True),
+access = get_access()
+chats_page = st.Page(chats.render, title="Чаты", icon="💬", url_path="chats", default=True)
+work = [
+    chats_page,
+    st.Page(onboarding.render, title="Новому сотруднику", icon="🎓", url_path="onboarding"),
     st.Page(about.render, title="О проекте", icon="📐", url_path="about"),
     st.Page(howto.render, title="Как работать", icon="📖", url_path="howto"),
 ]
+lead = []
+if access.can(user, "stats.view"):
+    lead.append(st.Page(quality.render, title="Качество", icon="📊", url_path="quality"))
+if access.can(user, "harness.edit"):
+    lead.append(st.Page(harness_page.render, title="Харнес", icon="🧠", url_path="harness"))
 if user.role == "admin":
-    pages.append(st.Page(admin.render, title="Настройки", icon="⚙️", url_path="settings"))
-page = st.navigation(pages)
+    lead.append(st.Page(admin.render, title="Настройки", icon="⚙️", url_path="settings"))
+st.session_state["pages"] = {"chats": chats_page}
+page = st.navigation({"Работа": work, "Руководителю": lead} if lead else work)
 page.run()

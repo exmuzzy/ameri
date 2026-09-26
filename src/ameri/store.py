@@ -26,7 +26,11 @@ CREATE TABLE IF NOT EXISTS messages (
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     action TEXT,
     content TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    prompt_tokens INTEGER,
+    completion_tokens INTEGER,
+    cache_hit_tokens INTEGER,
+    harness_version TEXT
 );
 CREATE TABLE IF NOT EXISTS attachments (
     id INTEGER PRIMARY KEY,
@@ -36,7 +40,28 @@ CREATE TABLE IF NOT EXISTS attachments (
     size INTEGER NOT NULL,
     sha256 TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS feedback (
+    id INTEGER PRIMARY KEY,
+    message_id INTEGER NOT NULL REFERENCES messages(id),
+    reviewer TEXT NOT NULL,
+    rating INTEGER NOT NULL CHECK (rating IN (-1, 1)),
+    comment TEXT NOT NULL DEFAULT '',
+    corrected_text TEXT NOT NULL DEFAULT '',
+    rule_text TEXT NOT NULL DEFAULT '',
+    as_example INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'reviewed'
+        CHECK (status IN ('reviewed', 'proposed', 'applied', 'rejected')),
+    commit_sha TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS onboarding (
+    login TEXT NOT NULL,
+    step TEXT NOT NULL,
+    done_at TEXT NOT NULL,
+    PRIMARY KEY (login, step)
+);
 CREATE INDEX IF NOT EXISTS messages_chat ON messages(chat_id, id);
+CREATE INDEX IF NOT EXISTS feedback_message ON feedback(message_id);
 CREATE INDEX IF NOT EXISTS attachments_message ON attachments(message_id);
 """
 
@@ -71,6 +96,36 @@ class Message:
     content: str
     created_at: str
     attachments: tuple[Attachment, ...] = field(default_factory=tuple)
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    cache_hit_tokens: int | None = None
+    harness_version: str | None = None
+
+
+@dataclass(frozen=True)
+class Feedback:
+    id: int
+    message_id: int
+    reviewer: str
+    rating: int
+    comment: str
+    corrected_text: str
+    rule_text: str
+    as_example: bool
+    status: str
+    commit_sha: str | None
+    created_at: str
+    chat_id: int = 0
+    question: str = ""
+    answer: str = ""
+    chat_owner: str = ""
+
+
+@dataclass(frozen=True)
+class Usage:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cache_hit_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -152,13 +207,21 @@ class Store:
         content: str,
         action: str | None = None,
         files: list[tuple[str, bytes]] | tuple = (),
+        usage: Usage | None = None,
+        harness_version: str | None = None,
     ) -> Message:
         now = _now()
+        usage = usage or Usage()
         with self._connect() as db:
             cursor = db.execute(
-                "INSERT INTO messages (chat_id, author, role, action, content, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (chat_id, author, role, action, content, now),
+                "INSERT INTO messages (chat_id, author, role, action, content, created_at, "
+                "prompt_tokens, completion_tokens, cache_hit_tokens, harness_version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    chat_id, author, role, action, content, now,
+                    usage.prompt_tokens or None, usage.completion_tokens or None,
+                    usage.cache_hit_tokens or None, harness_version,
+                ),
             )
             message_id = int(cursor.lastrowid)
             for name, data in files:
@@ -209,6 +272,121 @@ class Store:
                 content=row["content"],
                 created_at=row["created_at"],
                 attachments=tuple(by_message.get(row["id"], ())),
+                prompt_tokens=row["prompt_tokens"],
+                completion_tokens=row["completion_tokens"],
+                cache_hit_tokens=row["cache_hit_tokens"],
+                harness_version=row["harness_version"],
             )
             for row in rows
         ]
+
+    # --- Оценки и Исправления Руководителя ---
+
+    def add_feedback(
+        self,
+        message_id: int,
+        *,
+        reviewer: str,
+        rating: int,
+        comment: str = "",
+        corrected_text: str = "",
+        rule_text: str = "",
+        as_example: bool = False,
+    ) -> int:
+        status = "proposed" if (rule_text.strip() or as_example) else "reviewed"
+        with self._connect() as db:
+            cursor = db.execute(
+                "INSERT INTO feedback (message_id, reviewer, rating, comment, corrected_text, "
+                "rule_text, as_example, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    message_id, reviewer, rating, comment.strip(), corrected_text.strip(),
+                    rule_text.strip(), int(as_example), status, _now(),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def _feedback_query(self, where: str, params: list[object]) -> list[Feedback]:
+        sql = (
+            "SELECT f.*, m.chat_id AS chat_id, m.content AS answer, c.owner AS chat_owner, "
+            "(SELECT q.content FROM messages q WHERE q.chat_id = m.chat_id AND q.role = 'user' "
+            " AND q.id < m.id ORDER BY q.id DESC LIMIT 1) AS question "
+            "FROM feedback f JOIN messages m ON m.id = f.message_id JOIN chats c ON c.id = m.chat_id "
+            f"WHERE {where} ORDER BY f.id DESC"
+        )
+        with self._connect() as db:
+            rows = db.execute(sql, params).fetchall()
+        return [
+            Feedback(
+                **{k: row[k] for k in row.keys() if k not in {"as_example", "question"}},
+                as_example=bool(row["as_example"]),
+                question=row["question"] or "",
+            )
+            for row in rows
+        ]
+
+    def feedback_for_chat(self, chat_id: int) -> dict[int, list[Feedback]]:
+        result: dict[int, list[Feedback]] = {}
+        for item in self._feedback_query("m.chat_id = ?", [chat_id]):
+            result.setdefault(item.message_id, []).append(item)
+        return result
+
+    def list_feedback(self, status: str | None = None) -> list[Feedback]:
+        if status is None:
+            return self._feedback_query("1=1", [])
+        return self._feedback_query("f.status = ?", [status])
+
+    def set_feedback_status(self, feedback_id: int, status: str, commit_sha: str | None = None) -> None:
+        with self._connect() as db:
+            db.execute(
+                "UPDATE feedback SET status = ?, commit_sha = COALESCE(?, commit_sha) WHERE id = ?",
+                (status, commit_sha, feedback_id),
+            )
+
+    # --- Статистика для Руководителя ---
+
+    def stats_by_owner(self) -> list[dict[str, object]]:
+        """По каждому автору Чатов: сообщения, ответы Ассистента, оценки, Исправления, токены."""
+
+        sql = """
+        SELECT c.owner AS owner,
+               COUNT(DISTINCT c.id) AS chats,
+               SUM(m.role = 'user') AS user_messages,
+               SUM(m.role = 'assistant' AND m.author = 'assistant') AS answers,
+               COALESCE(SUM(m.prompt_tokens), 0) AS prompt_tokens,
+               COALESCE(SUM(m.completion_tokens), 0) AS completion_tokens,
+               COALESCE(SUM(m.cache_hit_tokens), 0) AS cache_hit_tokens,
+               MAX(m.created_at) AS last_activity
+        FROM chats c LEFT JOIN messages m ON m.chat_id = c.id
+        GROUP BY c.owner ORDER BY last_activity DESC
+        """
+        feedback_sql = """
+        SELECT c.owner AS owner, SUM(f.rating = 1) AS likes, SUM(f.rating = -1) AS dislikes,
+               SUM(f.corrected_text != '') AS corrections
+        FROM feedback f JOIN messages m ON m.id = f.message_id JOIN chats c ON c.id = m.chat_id
+        GROUP BY c.owner
+        """
+        with self._connect() as db:
+            rows = [dict(r) for r in db.execute(sql)]
+            fb = {r["owner"]: dict(r) for r in db.execute(feedback_sql)}
+        for row in rows:
+            extra = fb.get(row["owner"], {})
+            row["likes"] = extra.get("likes") or 0
+            row["dislikes"] = extra.get("dislikes") or 0
+            row["corrections"] = extra.get("corrections") or 0
+        return rows
+
+    # --- Онбординг ---
+
+    def onboarding_done(self, login: str) -> set[str]:
+        with self._connect() as db:
+            return {r["step"] for r in db.execute("SELECT step FROM onboarding WHERE login = ?", (login,))}
+
+    def set_onboarding(self, login: str, step: str, done: bool) -> None:
+        with self._connect() as db:
+            if done:
+                db.execute(
+                    "INSERT OR IGNORE INTO onboarding (login, step, done_at) VALUES (?, ?, ?)",
+                    (login, step, _now()),
+                )
+            else:
+                db.execute("DELETE FROM onboarding WHERE login = ? AND step = ?", (login, step))

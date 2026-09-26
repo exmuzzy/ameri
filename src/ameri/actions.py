@@ -4,24 +4,72 @@ from __future__ import annotations
 
 import sys
 import tempfile
+import zipfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .llm import DeepSeekChat
-from .store import Attachment, Message
+from .store import Attachment, Message, Usage
 
 TEXT_SUFFIXES = {".md", ".txt", ".csv"}
 PARSED_SUFFIXES = {".xlsx", ".docx", ".doc"}
-DUCT_SUFFIXES = {".md", ".xlsx", ".docx", ".doc", ".csv"}
+DUCT_SUFFIXES = {".md", ".xlsx", ".docx", ".doc", ".csv", ".odt"}
 CONNECTION_TYPES = {"Фланец": "flange", "Раструб": "socket", "Без соединения": "none"}
 DUCT_TEMPLATE_NAME = "шаблон расчетки стоимости воздуховодов.xlsx"
 MAX_FILE_CHARS = 60_000
+# Бюджет истории Чата в символах (~40–50 тыс. токенов): старые сообщения отбрасываются первыми.
+MAX_HISTORY_CHARS = 150_000
 
 
 @dataclass(frozen=True)
 class ActionResult:
     text: str
     files: list[tuple[str, bytes]] = field(default_factory=list)
+    usage: Usage | None = None
+
+
+def _odt_node_text(node: ET.Element) -> str:
+    parts = [node.text or ""]
+    for child in node:
+        tag = child.tag.rsplit("}", 1)[-1]
+        if tag == "s":
+            parts.append(" " * int(next((v for k, v in child.attrib.items() if k.endswith("}c")), "1")))
+        elif tag in ("tab", "line-break"):
+            parts.append(" ")
+        else:
+            parts.append(_odt_node_text(child))
+        parts.append(child.tail or "")
+    return "".join(parts)
+
+
+def odt_text(path: Path) -> str:
+    """Текст OpenDocument (.odt): абзац — строка, строка таблицы — ячейки через « | »."""
+
+    root = ET.fromstring(zipfile.ZipFile(path).read("content.xml"))
+    lines: list[str] = []
+
+    def walk(node: ET.Element) -> None:
+        for child in node:
+            tag = child.tag.rsplit("}", 1)[-1]
+            if tag == "table-row":
+                cells = [
+                    " ".join(_odt_node_text(cell).split())
+                    for cell in child
+                    if cell.tag.rsplit("}", 1)[-1] == "table-cell"
+                ]
+                row = " | ".join(cell for cell in cells if cell)
+                if row:
+                    lines.append(row)
+            elif tag in ("p", "h"):
+                text = " ".join(_odt_node_text(child).split())
+                if text:
+                    lines.append(text)
+            else:
+                walk(child)
+
+    walk(root)
+    return "\n".join(lines)
 
 
 def duct_calc_available(duct_calc_dir: Path | None) -> bool:
@@ -45,6 +93,11 @@ def attachment_text(attachment: Attachment, duct_calc_dir: Path | None) -> str:
     text = ""
     if suffix in TEXT_SUFFIXES:
         text = attachment.path.read_text(encoding="utf-8", errors="replace")
+    elif suffix == ".odt":
+        try:
+            text = odt_text(attachment.path)
+        except (zipfile.BadZipFile, KeyError, ET.ParseError):
+            text = ""
     elif suffix in PARSED_SUFFIXES and duct_calc_available(duct_calc_dir):
         _import_duct_calc(duct_calc_dir)
         from duct_calc.document_parser import parse_document
@@ -65,17 +118,36 @@ def ask_assistant(
     duct_calc_dir: Path | None,
     names: dict[str, str],
 ) -> ActionResult:
-    """Свободный вопрос: вся переписка Чата с текстом вложений."""
+    """Свободный вопрос: переписка Чата с текстом вложений в пределах бюджета.
 
-    messages = [{"role": "system", "content": system_prompt}]
+    Системный промпт (Харнес) идёт первым и одинаков для всех Чатов — это
+    кэшируемый префикс DeepSeek; переписка добавляется после него.
+    """
+
+    turns: list[dict[str, str]] = []
     for message in history:
         content = message.content
         if message.role == "user":
             content = f"{names.get(message.author, message.author)}: {content}"
+        elif message.author != "assistant":
+            content = f"[Ответ исправлен руководителем {names.get(message.author, message.author)}]\n{content}"
         for attachment in message.attachments:
             content += "\n\n" + attachment_text(attachment, duct_calc_dir)
-        messages.append({"role": message.role, "content": content})
-    return ActionResult(text=llm.complete(messages))
+        turns.append({"role": message.role, "content": content})
+
+    kept: list[dict[str, str]] = []
+    budget = MAX_HISTORY_CHARS
+    for turn in reversed(turns):
+        budget -= len(turn["content"])
+        if budget < 0 and kept:
+            break
+        kept.append(turn)
+    kept.reverse()
+    if len(kept) < len(turns):
+        kept.insert(0, {"role": "user", "content": f"[Ранние сообщения чата ({len(turns) - len(kept)}) опущены из-за длины.]"})
+
+    text, usage = llm.complete([{"role": "system", "content": system_prompt}, *kept])
+    return ActionResult(text=text, usage=usage)
 
 
 def duct_calc(
@@ -98,12 +170,17 @@ def duct_calc(
     client = DeepSeekClient(ModelClientConfig(base_url=base_url, api_key=api_key, model=model))
     with tempfile.TemporaryDirectory() as tmp:
         output = Path(tmp) / f"расчетка_{spec.path.stem}.xlsx"
+        source = spec.path
+        if source.suffix.lower() == ".odt":
+            # Прототип не читает OpenDocument: передаём ему текст документа как Markdown.
+            source = Path(tmp) / f"{spec.path.stem}.md"
+            source.write_text(odt_text(spec.path), encoding="utf-8")
         try:
-            if spec.path.suffix.lower() == ".csv":
+            if source.suffix.lower() == ".csv":
                 from duct_calc.csv_pipeline import run_csv_pipeline
 
                 result = run_csv_pipeline(
-                    source_path=spec.path,
+                    source_path=source,
                     output_path=output,
                     connection_type=CONNECTION_TYPES[connection_label],
                     template_path=duct_calc_dir / "data" / DUCT_TEMPLATE_NAME,
@@ -112,7 +189,7 @@ def duct_calc(
                 summary = f"Позиций: {result.source_item_count}, строк в расчётке: {result.output_row_count}."
             else:
                 result = run_specification_pipeline(
-                    source_path=spec.path,
+                    source_path=source,
                     output_path=output,
                     connection_type=CONNECTION_TYPES[connection_label],
                     template_path=duct_calc_dir / "data" / DUCT_TEMPLATE_NAME,

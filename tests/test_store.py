@@ -34,3 +34,28 @@ def test_safe_file_name():
     assert safe_file_name("../../etc/passwd") == "passwd"
     assert safe_file_name("расчётка.xlsx") == "расчётка.xlsx"
     assert safe_file_name("") == "file"
+
+
+def test_feedback_and_stats(tmp_path):
+    store = make_store(tmp_path)
+    chat_id = store.create_chat("t", "anna")
+    store.add_message(chat_id, author="anna", role="user", content="вопрос")
+    answer = store.add_message(chat_id, author="assistant", role="assistant", content="ответ")
+    store.add_feedback(answer.id, reviewer="boss", rating=-1, corrected_text="верно так", rule_text="правило")
+    store.add_feedback(answer.id, reviewer="boss", rating=1)
+    proposed = store.list_feedback("proposed")
+    assert len(proposed) == 1 and proposed[0].question == "вопрос" and proposed[0].chat_owner == "anna"
+    store.set_feedback_status(proposed[0].id, "applied", "abc123")
+    assert store.list_feedback("applied")[0].commit_sha == "abc123"
+    stats = store.stats_by_owner()[0]
+    assert (stats["owner"], stats["answers"], stats["likes"], stats["dislikes"], stats["corrections"]) == ("anna", 1, 1, 1, 1)
+    assert set(store.feedback_for_chat(chat_id)) == {answer.id}
+
+
+def test_onboarding(tmp_path):
+    store = make_store(tmp_path)
+    store.set_onboarding("anna", "login", True)
+    store.set_onboarding("anna", "login", True)
+    assert store.onboarding_done("anna") == {"login"}
+    store.set_onboarding("anna", "login", False)
+    assert store.onboarding_done("anna") == set()

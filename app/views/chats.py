@@ -5,9 +5,9 @@ from __future__ import annotations
 import streamlit as st
 
 from ameri import actions
-from ameri.harness import assistant_prompt
+from ameri.harness import HarnessRepo, assistant_prompt
 from ameri.llm import DeepSeekChat, LlmError
-from ameri.store import Chat, Message
+from ameri.store import Chat, Feedback, Message
 
 from views.common import current_user, display_name, get_access, get_settings, get_store, get_users
 
@@ -69,7 +69,60 @@ def _history_column() -> None:
             st.rerun()
 
 
-def _render_message(message: Message) -> None:
+def _feedback_badges(items: list[Feedback]) -> str:
+    marks = []
+    for item in items:
+        mark = "👍" if item.rating > 0 else "👎"
+        if item.corrected_text:
+            mark += "✏️"
+        if item.status == "proposed":
+            mark += " (правило на утверждении)"
+        elif item.status == "applied":
+            mark += f" (в харнесе {item.commit_sha or ''})"
+        marks.append(f"{mark} {display_name(item.reviewer)}")
+    return " · ".join(marks)
+
+
+def _review_controls(chat: Chat, message: Message) -> None:
+    """Оценка и Исправление ответа Ассистента Руководителем."""
+
+    store = get_store()
+    user = current_user()
+    col_like, col_dislike, col_fix = st.columns([1, 1, 6])
+    if col_like.button("👍", key=f"like-{message.id}", help="Хороший ответ"):
+        store.add_feedback(message.id, reviewer=user.login, rating=1)
+        st.rerun()
+    if col_dislike.button("👎", key=f"dislike-{message.id}", help="Плохой ответ"):
+        store.add_feedback(message.id, reviewer=user.login, rating=-1)
+        st.rerun()
+    with col_fix.popover("✏️ Исправить и научить"):
+        with st.form(f"fix-{message.id}", clear_on_submit=True):
+            corrected = st.text_area("Как надо было ответить", value=message.content, height=200)
+            comment = st.text_input("Что было не так (для истории)")
+            rule = st.text_area(
+                "Правило, которое надо запомнить (необязательно)",
+                placeholder="Например: клапан считать как 2 метра прямого участка того же сечения.",
+            )
+            as_example = st.checkbox("Сохранить вопрос и правильный ответ как пример для ассистента")
+            if st.form_submit_button("Исправить", type="primary"):
+                store.add_feedback(
+                    message.id,
+                    reviewer=user.login,
+                    rating=-1,
+                    comment=comment,
+                    corrected_text=corrected,
+                    rule_text=rule,
+                    as_example=as_example,
+                )
+                store.add_message(
+                    chat.id, author=user.login, role="assistant", content=corrected, action="Исправление руководителя"
+                )
+                if rule.strip() or as_example:
+                    st.toast("Исправление отправлено в чат; правило ждёт утверждения на странице «Харнес».")
+                st.rerun()
+
+
+def _render_message(chat: Chat, message: Message, feedback: list[Feedback], can_review: bool) -> None:
     avatar = "📐" if message.role == "assistant" else None
     with st.chat_message(message.role, avatar=avatar):
         meta = f"**{display_name(message.author)}** · {message.created_at[:16].replace('T', ' ')} UTC"
@@ -85,6 +138,10 @@ def _render_message(message: Message) -> None:
                     file_name=attachment.name,
                     key=f"file-{attachment.id}",
                 )
+        if feedback:
+            st.caption(_feedback_badges(feedback))
+        if can_review and message.role == "assistant" and message.author == "assistant":
+            _review_controls(chat, message)
 
 
 def _run_action(chat: Chat, message: Message, action: str, connection: str | None) -> None:
@@ -95,7 +152,7 @@ def _run_action(chat: Chat, message: Message, action: str, connection: str | Non
             specs = [a for a in message.attachments if a.path.suffix.lower() in actions.DUCT_SUFFIXES]
             if not specs:
                 result = actions.ActionResult(
-                    "Для расчётки приложите файл спецификации: .md, .xlsx, .docx, .doc или .csv."
+                    "Для расчётки приложите файл спецификации: .md, .xlsx, .docx, .doc, .odt или .csv."
                 )
             else:
                 result = actions.duct_calc(
@@ -124,7 +181,14 @@ def _run_action(chat: Chat, message: Message, action: str, connection: str | Non
     except Exception as error:  # noqa: BLE001 - ошибка показывается в чате и не роняет страницу
         result = actions.ActionResult(f"Действие завершилось ошибкой: {error.__class__.__name__}: {error}")
     store.add_message(
-        chat.id, author="assistant", role="assistant", content=result.text, action=action, files=result.files
+        chat.id,
+        author="assistant",
+        role="assistant",
+        content=result.text,
+        action=action,
+        files=result.files,
+        usage=result.usage,
+        harness_version=HarnessRepo(settings.harness_dir).version(),
     )
 
 
@@ -135,8 +199,10 @@ def _chat_column(chat: Chat) -> None:
     st.subheader(chat.title)
     st.caption(f"Автор: {display_name(chat.owner)} · создан {chat.created_at[:16].replace('T', ' ')} UTC")
 
+    feedback = get_store().feedback_for_chat(chat.id)
+    can_review = access.can(user, "feedback.review")
     for message in get_store().messages(chat.id):
-        _render_message(message)
+        _render_message(chat, message, feedback.get(message.id, []), can_review)
 
     options = []
     if access.can(user, "action.ask"):
@@ -153,7 +219,7 @@ def _chat_column(chat: Chat) -> None:
     submitted = st.chat_input(
         "Сообщение",
         accept_file="multiple",
-        file_type=["md", "txt", "csv", "xlsx", "docx", "doc", "pdf", "png", "jpg", "jpeg"],
+        file_type=["md", "txt", "csv", "xlsx", "docx", "doc", "odt", "pdf", "png", "jpg", "jpeg"],
     )
     if submitted:
         text = (submitted.text or "").strip()

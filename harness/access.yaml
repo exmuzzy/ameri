@@ -13,6 +13,9 @@ roles:
       - chat.view_all        # видеть Чаты всех Менеджеров
       - action.ask
       - action.duct_calc
+      - feedback.review      # оценивать и исправлять ответы Ассистента
+      - harness.edit         # утверждать Правила и Примеры, править промпт
+      - stats.view           # страница «Качество»
   admin:
     title: Администратор
     grants:
@@ -20,3 +23,4 @@ roles:
       - chat.view_all
       - action.ask
       - action.duct_calc
+      - stats.view
