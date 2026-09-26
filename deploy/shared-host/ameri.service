@@ -1,0 +1,28 @@
+# Вариант без Docker: systemd-служба от отдельного пользователя ameri.
+# Установка: cp ameri.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable --now ameri
+[Unit]
+Description=ameri (Streamlit)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ameri
+Group=ameri
+WorkingDirectory=/srv/ameri/app
+EnvironmentFile=-/srv/ameri/ameri.env
+Environment=AMERI_PORT=18501
+Environment=HOME=/srv/ameri/data/home
+Environment=AMERI_DATA_DIR=/srv/ameri/data
+Environment=AMERI_DUCT_CALC_DIR=/srv/ameri/duct-calc
+ExecStart=/srv/ameri/venv/bin/streamlit run app/main.py --server.address=127.0.0.1 --server.port=${AMERI_PORT} --server.headless=true
+Restart=on-failure
+RestartSec=5
+MemoryMax=2G
+CPUQuota=150%
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/srv/ameri/data /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

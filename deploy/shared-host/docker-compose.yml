@@ -1,0 +1,49 @@
+# ameri на сервере, где уже работают другие сервисы (bishkek).
+# Отдельный compose-проект "ameri"; наружу по умолчанию ничего не публикуется:
+# сайт слушает только 127.0.0.1:${AMERI_PORT}, доступ — через reverse proxy или SSH-туннель.
+name: ameri
+
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/Dockerfile
+    image: ameri-app:latest
+    container_name: ameri-app
+    restart: unless-stopped
+    environment:
+      STREAMLIT_SERVER_BASE_URL_PATH: ${AMERI_BASE_PATH:-}
+    volumes:
+      - ${AMERI_ROOT:-/srv/ameri}/data:/data
+      - ${AMERI_ROOT:-/srv/ameri}/duct-calc:/duct-calc:ro
+    ports:
+      - "127.0.0.1:${AMERI_PORT:-18501}:8501"
+    mem_limit: ${AMERI_MEM_LIMIT:-2g}
+    cpus: ${AMERI_CPUS:-1.5}
+    networks: [ameri]
+
+  # Собственный HTTPS — только если порты 80 и 443 на сервере свободны:
+  #   docker compose --profile own-https up -d
+  caddy:
+    profiles: ["own-https"]
+    image: caddy:2
+    container_name: ameri-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?SITE_ADDRESS не задан}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [ameri]
+
+networks:
+  ameri:
+    name: ameri
+
+volumes:
+  caddy_data:
+  caddy_config:

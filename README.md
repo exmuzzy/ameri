@@ -147,6 +147,7 @@ flowchart LR
 ## Документы
 
 - [План реализации](docs/plan.md)
+- [Развёртывание на bishkek](docs/handoff-bishkek.md): задание для агента на компьютере заказчика
 - [Протокол решений](docs/decisions.md) и [ADR](docs/adr/)
 - [Исследование](docs/research.md): DeepSeek, Claude Code, самообучение харнеса, eval
 - [claude-ds](docs/claude-ds.md): Claude Code на модели DeepSeek
