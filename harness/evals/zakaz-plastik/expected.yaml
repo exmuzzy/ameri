@@ -1,0 +1,13 @@
+title: Заказ пластик, система В1 (docx, соединения по торцам)
+source: реальный запрос клиента, сентябрь 2026
+connection: socket
+positions:
+  - {line: "Система В1", red: false, type: null}
+  - {line: "Заглушка ф250", red: false, type: cap_round}
+  - {line: "Тройник Ф250/ф250/ф250", red: false, type: tee_round_round}
+  - {line: "Прямик ф250 L- 500мм", red: false, type: straight_round}
+  - {line: "Отвод ф250-90гр", red: false, type: elbow_round}
+  - {line: "Переход ф250/200х300", red: false, type: transition_rect_round}
+  - {line: "Переход ф250/ф315", red: false, type: transition_round_round}
+  - {line: "Отвод ф450-90гр", red: false, type: elbow_round}
+  - {line: "Переход ф450/600х300", red: false, type: transition_rect_round}

@@ -55,6 +55,7 @@ work = [
     st.Page(onboarding.render, title="Новому сотруднику", icon="🎓", url_path="onboarding"),
     st.Page(about.render, title="О проекте", icon="📐", url_path="about"),
     st.Page(howto.render, title="Как работать", icon="📖", url_path="howto"),
+    st.Page(howto.render_examples, title="Примеры работы", icon="🧩", url_path="examples"),
 ]
 lead = []
 if access.can(user, "stats.view"):

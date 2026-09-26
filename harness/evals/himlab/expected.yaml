@@ -1,0 +1,17 @@
+title: Вытяжка из химлаборатории (xlsx, единицы «мп»)
+source: реальный запрос клиента, сентябрь 2026; эталон — КП компании на этот запрос
+connection: socket
+positions:
+  - {line: "Вытяжка из химлаборатории", red: false, type: null}
+  - {line: "полипропилен ⌀160", red: false, type: straight_round}
+  - {line: "полипропилен ⌀200", red: false, type: straight_round}
+  - {line: "полипропилен ⌀250", red: false, type: straight_round}
+  - {line: "Ниппель ⌀250", red: false}
+  - {line: "Защитная сетка", red: false}
+  - {line: "Зонт круглый", red: false, type: umbrella_round}
+  - {line: "Тройник ⌀250-⌀160", red: false, type: tee_round_round}
+  - {line: "Отвод круглого", red: false, type: elbow_round}
+  - {line: "Переход круглого сечения", red: false, type: transition_round_round}
+  - {line: "Гибкая вставка", red: false}
+  - {line: "Хомут", red: false}
+  - {line: "Переход ф200/250х250", red: false, type: transition_rect_round}

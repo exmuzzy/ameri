@@ -162,6 +162,7 @@ def _run_action(chat: Chat, message: Message, action: str, connection: str | Non
                     base_url=settings.deepseek_base_url,
                     api_key=settings.api_key(),
                     model=settings.deepseek_model,
+                    harness_dir=settings.harness_dir,
                 )
         else:
             llm = DeepSeekChat(

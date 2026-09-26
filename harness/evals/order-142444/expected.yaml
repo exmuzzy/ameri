@@ -1,0 +1,20 @@
+title: Заказ 142444 (docx, толщины б=/δ=, дроссель-клапаны)
+source: реальный запрос клиента, сентябрь 2026
+connection: socket
+positions:
+  - {line: "ф400 – 16 м", red: false, type: straight_round}
+  - {line: "ф315 – 15 м", red: false, type: straight_round}
+  - {line: "ф250 – 16 м", red: false, type: straight_round}
+  - {line: "ф200 – 50 м", red: false, type: straight_round}
+  - {line: "ф125 – 32 м", red: false, type: straight_round}
+  - {line: "ф110 – 125 м", red: false, type: straight_round}
+  - {line: "500х350 – 1 м", red: false, type: straight_rect}
+  - {line: "∅110/∅125", red: false, type: transition_round_round}
+  - {line: "500х350/∅400", red: false, type: transition_rect_round}
+  - {line: "Тройник из ПП ф110", red: false, type: tee_round_round}
+  - {line: "Тройник из ПП ф125", red: false, type: tee_round_round}
+  - {line: "Тройник из ПП ф200", red: false, type: tee_round_round}
+  - {line: "Тройник из ПП ф400", red: false, type: tee_round_round}
+  - {line: "Отвод 90° из ПП ф110", red: false, type: elbow_round}
+  - {line: "Дроссель-клапан круглый ПП ф110", red: false}
+  - {line: "Дроссель-клапан круглый ПП ф315", red: false}

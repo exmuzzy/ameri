@@ -6,6 +6,8 @@ import sys
 import tempfile
 import zipfile
 import xml.etree.ElementTree as ET
+
+import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -150,6 +152,47 @@ def ask_assistant(
     return ActionResult(text=text, usage=usage)
 
 
+def duct_parse_rules(harness_dir: Path | None) -> str:
+    """Правила разбора из Харнеса, которые дописываются к промпту прототипа."""
+
+    if harness_dir is None:
+        return ""
+    path = harness_dir / "duct_calc" / "parse_rules.md"
+    return path.read_text(encoding="utf-8").strip() if path.is_file() else ""
+
+
+def duct_params(harness_dir: Path | None) -> dict:
+    if harness_dir is None:
+        return {}
+    path = harness_dir / "duct_calc" / "params.yaml"
+    return (yaml.safe_load(path.read_text(encoding="utf-8")) or {}) if path.is_file() else {}
+
+
+_KEYWORD_LISTS = {
+    "passthrough_keywords": "PASSTHROUGH_ITEM_KEYWORDS",
+    "grid_keywords": "GRID_KEYWORDS",
+    "valve_keywords": "VALVE_KEYWORDS",
+}
+
+
+def _install_harness(harness_dir: Path | None) -> None:
+    """Подключить Харнес к прототипу duct-calc: правила разбора и ключевые слова расчёта."""
+
+    from duct_calc import pipeline
+
+    original = getattr(pipeline, "_ameri_original_prompt", None) or pipeline.build_system_prompt
+    pipeline._ameri_original_prompt = original
+    rules = duct_parse_rules(harness_dir)
+    pipeline.build_system_prompt = (lambda: original() + "\n\n" + rules) if rules else original
+
+    params = duct_params(harness_dir)
+    for key, attr in _KEYWORD_LISTS.items():
+        base = getattr(pipeline, f"_ameri_original_{attr}", None) or getattr(pipeline, attr)
+        setattr(pipeline, f"_ameri_original_{attr}", base)
+        extra = tuple(str(word).lower() for word in params.get(key) or ())
+        setattr(pipeline, attr, tuple(base) + extra)
+
+
 def duct_calc(
     *,
     spec: Attachment,
@@ -158,12 +201,14 @@ def duct_calc(
     base_url: str,
     api_key: str,
     model: str,
+    harness_dir: Path | None = None,
 ) -> ActionResult:
     """Расчётка воздуховодов по вложенной Спецификации (прототип duct-calc)."""
 
     if not api_key:
         return ActionResult(text="Ключ DeepSeek не задан: Администратору нужно добавить его на сервер.")
     _import_duct_calc(duct_calc_dir)
+    _install_harness(harness_dir)
     from duct_calc.model_client import DeepSeekClient, ModelClientConfig
     from duct_calc.pipeline import PipelineNeedsInput, run_specification_pipeline
 
