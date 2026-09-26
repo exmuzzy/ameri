@@ -66,6 +66,8 @@ cat > /etc/cron.d/ameri-backup <<CRON
 30 3 * * * root tar -czf $ROOT/backups/ameri-\$(date +\%F).tgz -C $ROOT data && find $ROOT/backups -name 'ameri-*.tgz' -mtime +14 -delete
 CRON
 
+bash "$ROOT/app/deploy/install-autoupdate.sh"
+
 log "Запуск"
 cd "$ROOT/app/deploy"
 docker compose up -d --build
