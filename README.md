@@ -38,5 +38,5 @@ flowchart LR
 
 - [План реализации](docs/plan.md)
 - [Протокол решений](docs/decisions.md) и [ADR](docs/adr/)
-- [Исследование](docs/research.md), [хостинг](docs/hosting.md): частично устарели после отказа от Telegram, см. пометки в файлах
+- [Исследование](docs/research.md): DeepSeek, Claude Code, самообучение харнеса, eval
 - Скиллы для агентов: [.claude/skills](.claude/skills/README.md)
