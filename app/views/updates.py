@@ -34,9 +34,9 @@ def render_update_panel() -> None:
 
     status = _status()
     if status:
-        icon = {"done": "✅", "running": "⏳", "error": "⚠️"}.get(status.get("state"), "ℹ️")
+        label = {"done": "Готово", "running": "Выполняется", "error": "Ошибка"}.get(status.get("state"), "Статус")
         st.write(
-            f"{icon} {status.get('message', '')} · версия `{status.get('commit', '?')}` · "
+            f"**{label}** · {status.get('message', '')} · версия `{status.get('commit', '?')}` · "
             f"{status.get('finished_at', '')[:16].replace('T', ' ')} · запросил: {status.get('requested_by', '—')}"
         )
     if request.exists() and time.time() - request.stat().st_mtime > STALE_REQUEST_SECONDS:
@@ -45,7 +45,7 @@ def render_update_panel() -> None:
             "Администратору нужно один раз выполнить на сервере `bash /srv/ameri/app/deploy/install-autoupdate.sh`."
         )
 
-    if st.button("🔄 Обновить сайт из репозитория", type="primary"):
+    if st.button("Обновить сайт из репозитория", type="primary", icon=":material/sync:"):
         pulled = HarnessRepo(settings.harness_dir).pull()
         request.write_text(current_user().name, encoding="utf-8")
         st.success(f"{pulled}. Заявка на обновление кода отправлена.")

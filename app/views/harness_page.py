@@ -19,7 +19,7 @@ def _proposals() -> None:
     proposals = store.list_feedback("proposed")
     st.subheader(f"Ждут утверждения: {len(proposals)}")
     if not proposals:
-        st.caption("Новых предложений нет. Они появляются, когда вы исправляете ответ ассистента в чате и указываете правило или пример.")
+        st.info("Новых предложений нет. Исправьте ответ в чате и предложите правило или пример — они появятся здесь.")
     for item in proposals:
         with st.container(border=True):
             st.caption(
@@ -37,8 +37,8 @@ def _proposals() -> None:
                 rule = st.text_area("Текст правила", value=item.rule_text, height=100)
                 as_example = st.checkbox("Добавить пример «вопрос — правильный ответ»", value=item.as_example)
                 apply_col, reject_col = st.columns(2)
-                apply = apply_col.form_submit_button("✅ Утвердить и сохранить в харнес", type="primary")
-                reject = reject_col.form_submit_button("Отклонить")
+                apply = apply_col.form_submit_button("Утвердить и сохранить", type="primary", icon=":material/check:")
+                reject = reject_col.form_submit_button("Отклонить", icon=":material/close:")
             if apply:
                 repo = _repo()
                 user = current_user()
@@ -104,6 +104,12 @@ def render() -> None:
         _prompt()
     with tabs[4]:
         history = repo.history()
-        st.code("\n".join(history) if history else "Истории нет: каталог Харнеса не в git.", language=None)
+        st.subheader("История изменений")
+        if history:
+            for entry in history:
+                with st.container(border=True):
+                    st.text(entry)
+        else:
+            st.info("История пока пуста: каталог Харнеса не в git.")
     with tabs[5]:
         render_update_panel()

@@ -1,0 +1,83 @@
+:root {
+  --am-ink: currentColor;
+  --am-muted: inherit;
+  --am-surface: transparent;
+  --am-panel: transparent;
+  --am-soft: color-mix(in srgb, currentColor 5%, transparent);
+  --am-line: color-mix(in srgb, currentColor 22%, transparent);
+  --am-accent: var(--primary-color, #176f78);
+  --am-accent-soft: color-mix(in srgb, #42939b 12%, transparent);
+  --am-danger: color-mix(in srgb, var(--text-color, #21343a) 52%, #dc5559);
+  --am-danger-soft: color-mix(in srgb, var(--background-color, #f6f8f7) 88%, #dc5559);
+  --am-success: color-mix(in srgb, var(--text-color, #21343a) 52%, #4aab74);
+  --am-warning: color-mix(in srgb, var(--text-color, #21343a) 52%, #e5a045);
+  --am-info: color-mix(in srgb, var(--text-color, #21343a) 52%, #61a7d2);
+  --am-shadow: 0 8px 28px rgba(25, 54, 60, .055);
+  --am-r-sm: 8px;
+  --am-r-md: 12px;
+  --am-r-lg: 16px;
+  --am-space-1: 4px;
+  --am-space-2: 8px;
+  --am-space-3: 12px;
+  --am-space-4: 16px;
+  --am-space-6: 24px;
+  --am-space-8: 32px;
+  --am-font: 'IBM Plex Sans', 'PT Sans', system-ui, sans-serif;
+  --am-mono: 'IBM Plex Mono', 'DejaVu Sans Mono', monospace;
+}
+
+html, body, [data-testid="stApp"] { font-family: var(--am-font); }
+[data-testid="stSidebar"] { border-right: 1px solid var(--am-line); }
+[data-testid="stSidebar"] [data-testid="stButton"] button { min-height: 40px; }
+[data-testid="stSidebarNav"] { padding-top: 12px; }
+[data-testid="stMainBlockContainer"] { padding-top: clamp(24px, 4vw, 48px); padding-bottom: 56px; }
+[data-testid="stHeader"] { background: transparent; }
+[data-testid="stMarkdownContainer"] h1,
+[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3 { color: var(--am-ink); letter-spacing: -.025em; line-height: 1.2; }
+[data-testid="stMarkdownContainer"] h1 { font-weight: 700; font-size: clamp(1.75rem, 2.6vw, 2.35rem); margin-bottom: 10px; }
+[data-testid="stMarkdownContainer"] h2 { font-size: 1.35rem; margin-top: 32px; }
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li { line-height: 1.65; }
+[data-testid="stMainBlockContainer"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stMainBlockContainer"] [data-testid="stMarkdownContainer"] li { max-width: 78ch; }
+[data-testid="stCaptionContainer"] { color: var(--am-muted); }
+[data-testid="stCaptionContainer"] p { color: inherit; opacity: .85; }
+[data-testid="stVerticalBlockBorderWrapper"] { border-color: var(--am-line); border-radius: var(--am-r-lg); }
+[data-testid="stButton"] button,
+[data-testid="stPopover"] button,
+[data-testid="stFormSubmitButton"] button,
+[data-testid="stDownloadButton"] button { border-radius: var(--am-r-sm); font-weight: 600; transition: transform .15s ease, opacity .15s ease; }
+[data-testid="stButton"] button:hover,
+[data-testid="stFormSubmitButton"] button:hover { transform: translateY(-1px); }
+[data-testid="stButton"] button:focus-visible,
+[data-testid="stFormSubmitButton"] button:focus-visible,
+[data-testid="stDownloadButton"] button:focus-visible { outline: 2px solid var(--am-accent); outline-offset: 2px; }
+[data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea,
+[data-testid="stSelectbox"] { border-radius: var(--am-r-sm); }
+[data-testid="stChatMessage"] { border-radius: var(--am-r-md); border: 1px solid var(--am-line); padding: 16px 20px; margin-bottom: 12px; background: var(--am-panel); }
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) { background: var(--am-soft); }
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"]) { border-left: 3px solid var(--am-accent); }
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarCustom"]) { border-left: 3px solid var(--am-success); background: var(--am-accent-soft); }
+[data-testid="stChatInput"] { border-color: var(--am-line); border-radius: var(--am-r-md); }
+[data-testid="stChatInput"] textarea { min-height: 48px; }
+[data-testid="stMetric"] { border: 1px solid var(--am-line); border-radius: var(--am-r-md); background: var(--am-panel); padding: 18px 20px; min-height: 118px; box-shadow: var(--am-shadow); }
+[data-testid="stMetricValue"] { font-family: var(--am-mono); font-size: clamp(1.3rem, 2vw, 1.75rem); font-variant-numeric: tabular-nums; }
+[data-testid="stDataFrame"], [data-testid="stTable"] { font-variant-numeric: tabular-nums; }
+[data-testid="stTabs"] { margin-top: 18px; }
+[data-testid="stTabs"] button { font-weight: 600; }
+[data-testid="stCodeBlock"] { border-radius: var(--am-r-md); }
+[data-testid="stDownloadButton"] button { font-size: .85rem; }
+[data-testid="stAlert"] { border-radius: var(--am-r-md); }
+[data-testid="stProgress"] { margin: 20px 0 24px; }
+[data-testid="stSegmentedControl"] { margin-bottom: 12px; }
+@media (max-width: 767px) {
+  [data-testid="stMainBlockContainer"] { padding: 20px 16px 68px; }
+  [data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+  [data-testid="column"] { min-width: min(100%, 310px); flex: 1 1 100%; }
+  [data-testid="stMetric"] { min-height: 90px; }
+  [data-testid="stChatMessage"] { padding: 12px; }
+  [data-testid="stButton"] button,
+  [data-testid="stFormSubmitButton"] button { min-height: 44px; }
+}

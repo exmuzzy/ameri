@@ -6,3 +6,24 @@ maxUploadSize = 50
 
 [browser]
 gatherUsageStats = false
+
+[theme]
+base = "light"
+font = "IBM Plex Sans:https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap, sans-serif"
+codeFont = "IBM Plex Mono:https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap, monospace"
+baseRadius = "0.75rem"
+buttonRadius = "0.5rem"
+
+[theme.light]
+primaryColor = "#176F78"
+backgroundColor = "#F6F8F7"
+secondaryBackgroundColor = "#EAF0F0"
+textColor = "#21343A"
+borderColor = "#CBD8D9"
+
+[theme.dark]
+primaryColor = "#70C5C8"
+backgroundColor = "#142328"
+secondaryBackgroundColor = "#243A40"
+textColor = "#E4EDED"
+borderColor = "#415B61"
