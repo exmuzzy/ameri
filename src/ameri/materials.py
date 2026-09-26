@@ -113,7 +113,7 @@ def load_materials(harness_dir: Path | None) -> list[Material]:
     folder = harness_dir / MATERIALS_DIR if harness_dir else None
     if folder is None or not folder.is_dir():
         return []
-    return [parse_material(path) for path in sorted(folder.glob("*.md"))]
+    return [parse_material(path) for path in sorted(folder.glob("*.md")) if path.name != "README.md"]
 
 
 def find_material(materials: list[Material], doc_id: str | None) -> Material | None:

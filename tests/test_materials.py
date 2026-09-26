@@ -53,6 +53,7 @@ def make_harness(tmp_path: Path) -> Path:
     folder.mkdir()
     (folder / "20-chemical-resistance.md").write_text(CHEMISTRY, encoding="utf-8")
     (folder / "10-nomenclature.md").write_text(NAMES, encoding="utf-8")
+    (folder / "README.md").write_text("# Как устроены материалы\n", encoding="utf-8")
     return harness
 
 
@@ -143,3 +144,16 @@ def test_repository_materials_are_valid():
         for label, url in re.findall(r"\[([^\]]+)\]\((/materials\?[^)\s]+)\)", path.read_text(encoding="utf-8")):
             shown, links = materials.split_links(f"[{label}]({url})", loaded)
             assert links, f"{path.name}: ссылка {url} ведёт на несуществующий раздел"
+
+
+def test_ask_assistant_uses_attached_spec_for_materials(tmp_path):
+    loaded = materials.load_materials(make_harness(tmp_path))
+    store = Store(tmp_path / "db.sqlite3", tmp_path / "files")
+    chat_id = store.create_chat("t", "anna")
+    store.add_message(
+        chat_id, author="anna", role="user", content="Что тут может смутить производство?",
+        files=[("spec.md", "Колено ф250 — 2 шт".encode())],
+    )
+    llm = FakeLlm()
+    actions.ask_assistant(llm, "sys", store.messages(chat_id), None, {}, materials=loaded)
+    assert "[Отводы](/materials?doc=nomenclature&section=otvody)" in llm.messages[-1]["content"]

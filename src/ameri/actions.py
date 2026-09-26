@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .llm import DeepSeekChat, key_problem
-from .materials import Material, find_sections, sections_context
+from .materials import MAX_SECTIONS, Material, find_sections, sections_context
 from .store import Attachment, Message, Usage
 
 TEXT_SUFFIXES = {".md", ".txt", ".csv"}
@@ -126,19 +126,24 @@ def ask_assistant(
 
     Системный промпт (Харнес) идёт первым и одинаков для всех Чатов — это
     кэшируемый префикс DeepSeek; переписка добавляется после него. Разделы Материалов
-    отрасли, подходящие к двум последним вопросам, дописываются в конец последнего
-    сообщения пользователя: так они не сдвигают кэшируемое начало запроса.
+    отрасли, подходящие к двум последним вопросам (и к файлам последнего сообщения),
+    дописываются в конец последнего сообщения пользователя: так они не сдвигают
+    кэшируемое начало запроса.
     """
 
     turns: list[dict[str, str]] = []
+    files_text = ""  # вложения последнего сообщения пользователя — для подбора Материалов
     for message in history:
         content = message.content
         if message.role == "user":
             content = f"{names.get(message.author, message.author)}: {content}"
         elif message.author != "assistant":
             content = f"[Ответ исправлен руководителем {names.get(message.author, message.author)}]\n{content}"
-        for attachment in message.attachments:
-            content += "\n\n" + attachment_text(attachment, duct_calc_dir)
+        attached = [attachment_text(attachment, duct_calc_dir) for attachment in message.attachments]
+        for text in attached:
+            content += "\n\n" + text
+        if message.role == "user":
+            files_text = "\n".join(attached)
         turns.append({"role": message.role, "content": content})
 
     kept: list[dict[str, str]] = []
@@ -154,6 +159,10 @@ def ask_assistant(
 
     questions = [m.content for m in history if m.role == "user"][-2:]
     sections = find_sections(materials or [], "\n".join(questions))
+    if files_text and len(sections) < MAX_SECTIONS:
+        # Сначала — разделы по самому вопросу, остальные места — по тексту приложенного файла.
+        extra = [s for s in find_sections(materials or [], files_text) if s not in sections]
+        sections += extra[: MAX_SECTIONS - len(sections)]
     if sections:
         reference = sections_context(sections)
         if kept and kept[-1]["role"] == "user":
