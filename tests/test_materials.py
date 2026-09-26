@@ -76,6 +76,14 @@ def test_find_sections_matches_word_forms(tmp_path):
     assert found and found[0].id == "acids"
     assert materials.find_sections(loaded, "клиент пишет «колено ф250»")[0].id == "otvody"
     assert materials.find_sections(loaded, "сколько стоит доставка") == []
+    both = materials.find_sections(loaded, "Серная кислота на ПП и что такое колено?")
+    assert {s.id for s in both} == {"acids", "otvody"}  # вопрос о двух темах — разделы по обеим
+
+
+def test_tokens_split_letters_and_digits():
+    words = materials.tokens("Переход ф450/600х300 – труба/фланец20, 5–7 шт")
+    assert "фланц" in words and "20" in words and "450" in words
+    assert "5" not in words and "ф" not in words  # однозначные числа и одиночные буквы — шум
 
 
 def test_prompt_lists_materials_after_examples(tmp_path):

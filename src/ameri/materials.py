@@ -26,20 +26,26 @@ PROMPT_FILE = Path("prompts") / "materials.md"
 # Сколько разделов и текста подкладывать к вопросу ассистенту.
 MAX_SECTIONS = 3
 MAX_SECTION_CHARS = 3_500
-# Порог — доля от оценки раздела, где одно редкое слово вопроса встречается один раз.
-MIN_SCORE = 0.6
+# Порог — доля от оценки раздела, где одно редкое слово вопроса встречается один раз;
+# кроме того, раздел должен набрать не меньше трети оценки лучшего.
+MIN_SCORE = 0.8
+RELATIVE_SCORE = 0.35
+TITLE_WEIGHT = 3.0
 
 _HEADING = re.compile(r"^## +(.+?)\s*(?:\{#([a-z0-9][a-z0-9-]*)\})?\s*$")
 _LINK = re.compile(r"\[([^\]\n]+)\]\((/" + PAGE_PATH + r"\?[^)\s]+)\)")
-_WORD = re.compile(r"[a-zа-я0-9]+")
+_WORD = re.compile(r"[a-zа-я]+|[0-9]+")
 _STOP = frozenset(
     "а без бы в во вам вас весь все всё вы где да для до его ее её если есть же за и из или им их к как "
     "ко когда кто ли либо мне мы на над не нет нужно о об однако он она они оно от по под при про с со "
     "так там то тоже только у уже чем что чтобы это этот эта эти я можно ну ещё еще какой какая какие "
-    "каких".split()
+    "каких сколько почему зачем чем чего кому надо нам наш наши свой один одна два две три".split()
 )
 # Основы слов, которые есть почти в любом вопросе к ассистенту и ничего не говорят о теме.
-_STOP_STEMS = frozenset("расчетк посчита клиент менеджер ассистент подскаж скаж ответ вопрос пишет присла спрашива".split())
+_STOP_STEMS = frozenset(
+    "расчетк посчита клиент менеджер ассистент подскаж скаж ответ вопрос пишет присла спрашива "
+    "привет спасиб пожалуйст письм переформулир соглас текст коротк подробн дел".split()
+)
 
 
 @dataclass(frozen=True)
@@ -155,41 +161,68 @@ def _stemmer():
 
 
 def tokens(text: str) -> list[str]:
-    words = _WORD.findall(text.lower().replace("ё", "е"))
-    stems = (_stem_word(word) for word in words if word not in _STOP and (len(word) > 1 or word.isdigit()))
-    return [stem for stem in stems if stem not in _STOP_STEMS]
+    """Основы слов для поиска. У длинных слов ещё и первые пять букв: стеммер не сводит
+    «температуры» и «температурные», «удлинится» и «удлиняются» к одной основе."""
+
+    result = []
+    for word in _WORD.findall(text.lower().replace("ё", "е")):
+        if word in _STOP or len(word) < 2:  # однобуквенные слова и однозначные числа — шум
+            continue
+        stem = _stem_word(word)
+        if stem in _STOP_STEMS:
+            continue
+        result.append(stem)
+        if len(word) >= 7 and word.isalpha() and stem != word[:5]:
+            result.append(word[:5])
+    return result
 
 
 def find_sections(
     materials: list[Material], query: str, limit: int = MAX_SECTIONS, min_score: float = MIN_SCORE
 ) -> list[Section]:
-    """Разделы, ближе всего подходящие к вопросу (BM25 по словам с учётом окончаний)."""
+    """Разделы, ближе всего подходящие к вопросу: BM25F по заголовку и тексту раздела.
+
+    Заголовок — отдельное поле с весом TITLE_WEIGHT без поправки на длину, чтобы длинный
+    раздел с таблицей не проигрывал короткому, если вопрос прямо о его теме.
+    """
 
     sections = [s for m in materials for s in m.sections]
     query_terms = set(tokens(query))
     if not sections or not query_terms:
         return []
-    docs = [Counter(tokens(f"{s.doc_title} {s.title} {s.title} {s.title} {s.text}")) for s in sections]
-    average = sum(sum(d.values()) for d in docs) / len(docs)
+    titles = [Counter(tokens(f"{s.doc_title} {s.title}")) for s in sections]
+    bodies = [Counter(tokens(s.text)) for s in sections]
+    average = sum(sum(b.values()) for b in bodies) / len(bodies) or 1
     k1, b = 1.5, 0.75
 
     def idf(containing: int) -> float:
-        return math.log(1 + (len(docs) - containing + 0.5) / (containing + 0.5))
+        return math.log(1 + (len(sections) - containing + 0.5) / (containing + 0.5))
 
     scored = []
-    for section, counts in zip(sections, docs):
-        length = sum(counts.values())
+    for section, title, body in zip(sections, titles, bodies):
+        norm = 1 - b + b * sum(body.values()) / average
         score = 0.0
         for term in query_terms:
-            frequency = counts.get(term, 0)
+            frequency = TITLE_WEIGHT * title.get(term, 0) + body.get(term, 0) / norm
             if frequency:
-                weight = idf(sum(1 for d in docs if term in d))
-                score += weight * frequency * (k1 + 1) / (frequency + k1 * (1 - b + b * length / average))
+                containing = sum(1 for t, d in zip(titles, bodies) if term in t or term in d)
+                score += idf(containing) * frequency * (k1 + 1) / (frequency + k1)
         score /= idf(1)  # оценка не зависит от размера справочника
         if score >= min_score:
             scored.append((score, section))
     scored.sort(key=lambda pair: -pair[0])
-    return [section for _, section in scored[:limit]]
+    best = scored[0][0] if scored else 0
+    found: list[Section] = []
+    per_material: Counter[str] = Counter()
+    for score, section in scored:
+        # Не больше двух разделов одного материала: вопрос сразу о нескольких темах
+        # («кислоты и работа на улице») должен получить разделы по каждой.
+        if score < RELATIVE_SCORE * best or len(found) == limit:
+            break
+        if per_material[section.doc_id] < 2:
+            per_material[section.doc_id] += 1
+            found.append(section)
+    return found
 
 
 def sections_context(sections: list[Section]) -> str:
