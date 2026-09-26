@@ -302,6 +302,27 @@ class Store:
             for row in rows
         ]
 
+    def get_message(self, message_id: int) -> Message | None:
+        with self._connect() as db:
+            row = db.execute("SELECT chat_id FROM messages WHERE id = ?", (message_id,)).fetchone()
+        if row is None:
+            return None
+        return next((m for m in self.messages(row["chat_id"]) if m.id == message_id), None)
+
+    def get_attachment(self, attachment_id: int) -> tuple[int, Attachment] | None:
+        """Вложение и id его Чата (для проверки доступа)."""
+
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT a.*, m.chat_id FROM attachments a JOIN messages m ON m.id = a.message_id WHERE a.id = ?",
+                (attachment_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return row["chat_id"], Attachment(
+            id=row["id"], name=row["name"], path=self.files_dir / row["path"], size=row["size"]
+        )
+
     # --- Оценки и Исправления Руководителя ---
 
     def add_feedback(
