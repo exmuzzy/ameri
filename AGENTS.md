@@ -14,7 +14,7 @@
 
 1. **Модель не калькулятор.** DeepSeek только разбирает текст и отвечает на вопросы; площади, массы и цены считает код. Никогда не заставляй модель считать деньги или геометрию.
 2. **Утверждает человек.** Изменение харнеса попадает в `harness/` только после кнопки руководителя; это состояние `feedback.status = applied`, выставляемое кодом. Не делай путей, где модель сама применяет правило.
-3. **Порядок промпта стабилен** (`harness.assistant_prompt`): промпт → правила → примеры, без дат и имён. Иначе ломается кэш префикса DeepSeek. Динамику (чат, файлы) — только после системного сообщения.
+3. **Порядок промпта стабилен** (`harness.assistant_prompt`): промпт → правила → примеры → список разделов материалов отрасли, без дат и имён. Иначе ломается кэш префикса DeepSeek. Динамику (чат, файлы, разделы материалов к вопросу) — только после системного сообщения.
 4. **Данные на сервере не трогаем.** `/srv/ameri/data` (база, файлы, пользователи, ключ) переживает любые обновления. Схему базы меняй только добавлением столбцов/таблиц в `store.SCHEMA` — `Store._migrate` добавит столбцы в существующую базу. Не переименовывай и не удаляй столбцы без явной миграции.
 5. **Репозиторий публичный.** Никаких секретов, ключей, паролей, персональных данных клиентов (ФИО, телефоны, почты), цен и шаблона расчётки с ценами. Метаданные файлов-эталонов очищай (автор, компания). Прототип duct-calc в репозиторий не кладём.
 6. **Права проверяет код** (`Access.can(user, grant)`) на каждом действии, не только скрытием кнопок.
@@ -30,7 +30,8 @@ app/views/onboarding.py     «Новому сотруднику»: чек-лис
 app/views/admin.py          «Настройки»: обновление, ключ DeepSeek, пользователи
 app/views/api_access.py     «Доступ к API»: личные токены (store.api_tokens, в базе — хэш)
 app/views/updates.py        кнопка «Обновить сайт» и статус обновления (логика — src/ameri/updates.py)
-app/views/about.py, howto.py  статьи из docs/site/*.md
+app/views/about.py, howto.py  статьи из docs/site/*.md («Как учится ассистент» — howto.render_assistant)
+app/views/materials.py      «Материалы отрасли»: поиск, документ, раздел по ссылке ?doc=&section=
 src/ameri/store.py          SQLite: chats, messages, attachments, feedback, onboarding; миграции
 src/ameri/auth.py           users.toml, scrypt-хэши, save_users
 src/ameri/harness.py        access.yaml, assistant_prompt, HarnessRepo (правила, примеры, git commit/pull/push)
@@ -39,13 +40,15 @@ src/ameri/chat_service.py   отправка сообщения и «Испра�
 src/ameri/users_service.py  пользователи: проверки формы «Настройки», сохранение, удаление
 src/ameri/api.py            HTTP API /api/v1 (FastAPI, uvicorn :8000): токены, чаты, файлы, оценки, пользователи
 src/ameri/actions.py        «Вопрос ассистенту», «Расчётка» (обёртка прототипа), .odt, подключение harness/duct_calc
+src/ameri/materials.py      материалы отрасли: разбор harness/materials, подбор разделов к вопросу (BM25), ссылки
 src/ameri/settings.py       переменные окружения, ключ DeepSeek из env или data/secrets
-harness/                    access.yaml, prompts/, rules/, examples/, duct_calc/, evals/
+harness/                    access.yaml, prompts/, rules/, examples/, materials/, duct_calc/, evals/
 docs/site/*.md              статьи сайта (О проекте, Как работать, Примеры, Новому сотруднику)
 deploy/                     Dockerfile, docker-compose.yml, Caddyfile, entrypoint.sh, bootstrap.sh,
                             beget.sh, autoupdate.sh, install-autoupdate.sh, shared-host/ (bishkek)
 tools/run_evals.py          прогон эталонов; tools/hash_password.py — хэш пароля
 tools/demo_via_api.py       демо-чаты на рабочем сайте через API (данные — demo/)
+tools/training_via_api.py   замеры «до/после обучения» через API (demo/training/, отчёт — docs/training-report.md)
 tests/                      pytest
 ```
 
@@ -67,6 +70,7 @@ DEEPSEEK_API_KEY=... AMERI_DUCT_CALC_DIR=/путь/к/duct-calc python tools/run
 - **Правило разбора спецификаций** — абзац в `harness/duct_calc/parse_rules.md` (дописывается к промпту прототипа через `actions._install_harness`); ключевые слова покупных позиций, решёток, клапанов — `harness/duct_calc/params.yaml`. Затем `tools/run_evals.py` и сравнение с `--no-harness`.
 - **Новый эталон** — `harness/evals/<имя>/spec.*` (реальный файл без персональных данных, метаданные очищены) + `expected.yaml` (`line`, `type`, `red`). См. `harness/evals/README.md`.
 - **Новая статья** — `docs/site/<имя>.md` + `st.Page` в `app/main.py` (функция-рендер в `app/views/howto.py`).
+- **Материал отрасли** — `harness/materials/<NN>-<slug>.md` по `harness/materials/README.md`: разделы `## Название {#id}`, в каждом ссылка на источник, `id` не меняются (на них ссылаются правила, примеры и ответы в чатах). Ежемесячное обновление — `prompts/industry-materials.md`; `tests/test_materials.py` проверяет формат и все ссылки `/materials?...`.
 - **Новое действие в чате** — функция в `src/ameri/actions.py`, возвращающая `ActionResult`; константа, ключ API и грант в `src/ameri/chat_service.py` (`ACTION_KEYS`, `ACTION_GRANTS`, `available_actions`, `run_action`); грант в `harness/access.yaml`. Сайт и API подхватят его сами.
 - **Новый запрос API** — в `src/ameri/api.py` только поверх функций ядра (`chat_service`, `users_service`, `Store`), права — `Access.can`; тест в `tests/test_api.py`. Эндпоинтов для утверждения харнеса и ключа DeepSeek не добавляем.
 - **Работа на рабочем сайте из облачной сессии** — браузер не подойдёт (прокси не пропускает WebSocket Streamlit); используйте API, пример — `tools/demo_via_api.py`.
@@ -86,4 +90,6 @@ DEEPSEEK_API_KEY=... AMERI_DUCT_CALC_DIR=/путь/к/duct-calc python tools/run
 - Прототип duct-calc подключается через `sys.path` и monkeypatch-ит `pipeline.build_system_prompt` и списки ключевых слов (`_install_harness`) — не правь его код из ameri, а расширяй через `harness/duct_calc/`.
 - `.odt` прототип не читает: `actions.odt_text` превращает его в Markdown.
 - DeepSeek: для ответов в чате `thinking` выключен (иначе `temperature` игнорируется); `total_cost` не считаем по ценам Anthropic — только по `usage`.
-- Открытые вопросы по правилам расчёта — Q37–Q41 в `docs/decisions.md`; не реализуй их догадкой.
+- Ссылки на разделы материалов — `/materials?doc=<id>&section=<id>`. В чате `materials.split_links` превращает их в `st.page_link`: обычная Markdown-ссылка открыла бы новую вкладку без входа.
+- Ключевые слова `params.yaml` прототип ищет как подстроки: слово не должно встречаться в названиях своих изделий (`tests/test_duct_params.py`).
+- Открытые вопросы по правилам расчёта — Q37–Q41 в `docs/decisions.md` и Q42–Q51 в `docs/harness-proposals.md`; не реализуй их догадкой.
