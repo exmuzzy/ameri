@@ -76,7 +76,7 @@ def test_find_sections_matches_word_forms(tmp_path):
     assert found and found[0].id == "acids"
     assert materials.find_sections(loaded, "клиент пишет «колено ф250»")[0].id == "otvody"
     assert materials.find_sections(loaded, "сколько стоит доставка") == []
-    both = materials.find_sections(loaded, "Серная кислота на ПП и что такое колено?")
+    both = materials.find_sections(loaded, "Колено и угол выдержат кислоту?")
     assert {s.id for s in both} == {"acids", "otvody"}  # вопрос о двух темах — разделы по обеим
 
 
