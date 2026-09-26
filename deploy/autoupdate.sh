@@ -47,6 +47,10 @@ if echo "$CHANGED" | grep -qvE '^(harness/|docs/|README\.md|CONTEXT\.md)'; then
     "$ROOT/data/ameri.sqlite3" "$ROOT/backups/ameri-before-update-$(date +%F-%H%M%S).sqlite3" 2>/dev/null || true
   ls -1t "$ROOT"/backups/ameri-before-update-*.sqlite3 2>/dev/null | tail -n +11 | xargs -r rm -f
   if (cd "$ROOT/app/deploy" && docker compose up -d --build) >> /var/log/ameri-update.log 2>&1; then
+    # Caddyfile смонтирован файлом: новую версию Caddy видит только после перезапуска.
+    if echo "$CHANGED" | grep -qx 'deploy/Caddyfile'; then
+      (cd "$ROOT/app/deploy" && docker compose restart caddy) >> /var/log/ameri-update.log 2>&1
+    fi
     status done "Сайт пересобран и перезапущен"
   else
     status error "Пересборка не удалась, см. /var/log/ameri-update.log"; exit 1

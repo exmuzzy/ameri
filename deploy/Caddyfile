@@ -1,4 +1,17 @@
 {$SITE_ADDRESS} {
 	encode gzip
-	reverse_proxy app:8501
+
+	# HTTP API (FastAPI): расчётка идёт несколько минут, поэтому длинный таймаут чтения.
+	handle /api/* {
+		reverse_proxy {$API_UPSTREAM:app:8000} {
+			transport http {
+				read_timeout 15m
+				write_timeout 15m
+			}
+		}
+	}
+
+	handle {
+		reverse_proxy app:8501
+	}
 }

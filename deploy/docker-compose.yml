@@ -24,6 +24,9 @@ services:
       - "443:443"
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS}
+      # Адрес HTTP API внутри compose; изменение окружения заставляет compose пересоздать caddy
+      # и перечитать Caddyfile при обновлении.
+      API_UPSTREAM: app:8000
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

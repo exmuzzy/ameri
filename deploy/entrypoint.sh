@@ -19,4 +19,22 @@ if [ -n "${AMERI_GIT_URL:-}" ]; then
   export AMERI_GIT_PUSH="${AMERI_GIT_PUSH:-1}"
 fi
 
-exec streamlit run app/main.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true
+# Два процесса: сайт (Streamlit) и HTTP API (uvicorn). Если один из них завершился, останавливаем
+# и второй и выходим с ошибкой — Docker перезапустит контейнер (restart: unless-stopped).
+streamlit run app/main.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true &
+SITE_PID=$!
+uvicorn --app-dir src ameri.api:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 30 &
+API_PID=$!
+
+stop() {
+  kill "$SITE_PID" "$API_PID" 2>/dev/null
+  wait
+}
+trap 'stop; exit 0' TERM INT
+
+while kill -0 "$SITE_PID" 2>/dev/null && kill -0 "$API_PID" 2>/dev/null; do
+  sleep 5
+done
+echo "[ameri] процесс сайта или API завершился, перезапуск контейнера"
+stop
+exit 1

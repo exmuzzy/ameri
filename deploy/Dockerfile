@@ -13,6 +13,6 @@ COPY . .
 ENV AMERI_DATA_DIR=/data \
     AMERI_DUCT_CALC_DIR=/duct-calc \
     PYTHONUNBUFFERED=1
-EXPOSE 8501
+EXPOSE 8501 8000
 HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')"
 CMD ["sh", "deploy/entrypoint.sh"]
