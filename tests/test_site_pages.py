@@ -70,3 +70,12 @@ def test_materials_page_shows_linked_section(site):
     assert "РАЗДЕЛ ПО ССЫЛКЕ" in [c.value for c in at.caption]
     at.text_input[0].input("колено").run()
     assert any(b.label == "Отводы · Как называют изделия" for b in at.button)
+
+
+def test_assistant_article_page(site):
+    at = open_app("assistant")
+    assert not at.exception
+    text = "\n".join(m.value for m in at.markdown)
+    assert "### Отраслевые источники" in text and "## Текущие правила" in text
+    links = [(p.proto.label, p.proto.page) for p in at.get("page_link")]
+    assert ("Открыть материалы отрасли", "materials") in links
