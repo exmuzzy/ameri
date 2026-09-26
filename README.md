@@ -291,6 +291,7 @@ DEEPSEEK_API_KEY=... AMERI_DUCT_CALC_DIR=/путь/к/duct-calc streamlit run ap
 - [AGENTS.md](AGENTS.md) — выжимка для агентов
 - [Промпт для оформления сайта](prompts/design-site.md) — задание агенту-дизайнеру
 - [Промпт для демо-чатов](prompts/demo-chats.md) — задание агенту: 10 демонстрационных чатов
+- [Промпт для исследования отрасли](prompts/industry-research.md) — задание агенту: что узнать об отрасли, чтобы дообучить харнес
 - [План реализации](docs/plan.md), [протокол решений](docs/decisions.md), [ADR](docs/adr/)
 - [Практики обучения харнеса](docs/practices.md) — цикл учителя, подключение DeepSeek
 - [Исследование](docs/research.md), [выбор VPS](docs/vps.md)
