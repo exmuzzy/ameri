@@ -38,6 +38,8 @@ _STOP = frozenset(
     "так там то тоже только у уже чем что чтобы это этот эта эти я можно ну ещё еще какой какая какие "
     "каких".split()
 )
+# Основы слов, которые есть почти в любом вопросе к ассистенту и ничего не говорят о теме.
+_STOP_STEMS = frozenset("расчетк посчита клиент менеджер ассистент подскаж скаж ответ вопрос пишет присла спрашива".split())
 
 
 @dataclass(frozen=True)
@@ -154,7 +156,8 @@ def _stemmer():
 
 def tokens(text: str) -> list[str]:
     words = _WORD.findall(text.lower().replace("ё", "е"))
-    return [_stem_word(word) for word in words if word not in _STOP and (len(word) > 1 or word.isdigit())]
+    stems = (_stem_word(word) for word in words if word not in _STOP and (len(word) > 1 or word.isdigit()))
+    return [stem for stem in stems if stem not in _STOP_STEMS]
 
 
 def find_sections(
