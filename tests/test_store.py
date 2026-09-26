@@ -59,3 +59,25 @@ def test_onboarding(tmp_path):
     assert store.onboarding_done("anna") == {"login"}
     store.set_onboarding("anna", "login", False)
     assert store.onboarding_done("anna") == set()
+
+
+def test_migration_adds_new_columns_and_keeps_data(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "db.sqlite3"
+    old = sqlite3.connect(db_path)
+    old.executescript(
+        "CREATE TABLE chats (id INTEGER PRIMARY KEY, title TEXT NOT NULL, owner TEXT NOT NULL, "
+        "created_at TEXT NOT NULL, updated_at TEXT NOT NULL);"
+        "CREATE TABLE messages (id INTEGER PRIMARY KEY, chat_id INTEGER NOT NULL, author TEXT NOT NULL, "
+        "role TEXT NOT NULL, action TEXT, content TEXT NOT NULL, created_at TEXT NOT NULL);"
+        "INSERT INTO chats VALUES (1, 'Старый чат', 'anna', '2026-01-01', '2026-01-01');"
+        "INSERT INTO messages VALUES (1, 1, 'anna', 'user', NULL, 'привет', '2026-01-01');"
+    )
+    old.commit()
+    old.close()
+    store = Store(db_path, tmp_path / "files")
+    messages = store.messages(1)
+    assert messages[0].content == "привет" and messages[0].prompt_tokens is None
+    store.add_feedback(1, reviewer="boss", rating=1)
+    assert store.get_chat(1).title == "Старый чат"

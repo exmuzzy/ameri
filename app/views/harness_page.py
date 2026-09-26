@@ -7,6 +7,7 @@ import streamlit as st
 from ameri.harness import HarnessRepo, PROMPT_FILE, list_examples, list_rules
 
 from views.common import current_user, display_name, get_settings, get_store
+from views.updates import render_update_panel
 
 
 def _repo() -> HarnessRepo:
@@ -92,9 +93,7 @@ def render() -> None:
         "Харнес — промпт, правила и примеры, по которым работает ассистент. Всё хранится в git-репозитории: "
         f"каждое изменение — коммит с вашим именем, его видно и можно откатить. Текущая версия: `{version or 'не в git'}`."
     )
-    if st.button("🔄 Подтянуть изменения из репозитория", help="Если харнес правили в ZCode или Cursor и отправили в GitHub"):
-        st.info(repo.pull())
-    tabs = st.tabs(["На утверждении", "Правила", "Примеры", "Промпт", "История изменений"])
+    tabs = st.tabs(["На утверждении", "Правила", "Примеры", "Промпт", "История изменений", "Обновление"])
     with tabs[0]:
         _proposals()
     with tabs[1]:
@@ -106,3 +105,5 @@ def render() -> None:
     with tabs[4]:
         history = repo.history()
         st.code("\n".join(history) if history else "Истории нет: каталог Харнеса не в git.", language=None)
+    with tabs[5]:
+        render_update_panel()

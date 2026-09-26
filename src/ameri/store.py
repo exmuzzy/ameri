@@ -146,6 +146,28 @@ class Store:
         files_dir.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
             db.executescript(SCHEMA)
+            self._migrate(db)
+
+    @staticmethod
+    def _migrate(db: sqlite3.Connection) -> None:
+        """Добавить в существующую базу столбцы, появившиеся в новых версиях SCHEMA.
+
+        CREATE TABLE IF NOT EXISTS не трогает уже созданные таблицы, поэтому новые
+        столбцы из SCHEMA добавляются через ALTER TABLE; данные при этом сохраняются.
+        """
+
+        reference = sqlite3.connect(":memory:")
+        reference.executescript(SCHEMA)
+        for (table,) in reference.execute("SELECT name FROM sqlite_master WHERE type = 'table'"):
+            existing = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+            for column in reference.execute(f"PRAGMA table_info({table})"):
+                name, col_type, default = column[1], column[2], column[4]
+                if name not in existing:
+                    ddl = f"ALTER TABLE {table} ADD COLUMN {name} {col_type}"
+                    if default is not None:
+                        ddl += f" DEFAULT {default}"
+                    db.execute(ddl)
+        reference.close()
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:

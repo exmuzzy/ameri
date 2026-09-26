@@ -9,6 +9,7 @@ import streamlit as st
 from ameri.auth import ROLES, User, hash_password, load_users, save_users
 
 from views.common import get_settings, get_users
+from views.updates import render_update_panel
 
 ROLE_TITLES = {"admin": "Администратор", "leader": "Руководитель", "manager": "Менеджер"}
 
@@ -68,6 +69,8 @@ def _users_section() -> None:
 
 def render() -> None:
     st.title("Настройки")
+    render_update_panel()
+    st.divider()
     _key_section()
     st.divider()
     _users_section()
