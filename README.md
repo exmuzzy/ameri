@@ -197,7 +197,7 @@ git commit -am "Харнес: <что и зачем>" && git push origin master
 
 ## Статус
 
-Сайт работает локально и покрыт тестами (`python -m pytest -q`). Развёртывание на VPS Beget — в процессе.
+Сайт работает на VPS Beget: **https://159-194-254-146.sslip.io** (сервер `ameri`, Санкт-Петербург, 2 CPU / 4 ГБ). Установлен командой `deploy/beget.sh`; данные — в `/srv/ameri/data`, прототип расчётки — в `/srv/ameri/duct-calc`. Код покрыт тестами (`python -m pytest -q`), разбор — эталонами (`tools/run_evals.py`).
 
 ## Документы
 
