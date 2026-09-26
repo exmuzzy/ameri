@@ -1,0 +1,4 @@
+#cloud-config
+# Шаблон user-data для создания VPS: подставьте __ADMIN_PASSWORD__ перед отправкой.
+runcmd:
+  - [bash, -c, "curl -fsSL https://raw.githubusercontent.com/exmuzzy/ameri/master/deploy/bootstrap.sh -o /root/ameri-bootstrap.sh && AMERI_ADMIN_PASSWORD='__ADMIN_PASSWORD__' bash /root/ameri-bootstrap.sh > /var/log/ameri-bootstrap.log 2>&1"]

@@ -1,0 +1,22 @@
+# Роли и Гранты. Учётные записи с паролями лежат на сервере в users.toml, не в git.
+roles:
+  manager:
+    title: Менеджер
+    grants:
+      - chat.create          # начинать новые Чаты
+      - action.ask           # свободный вопрос Ассистенту
+      - action.duct_calc     # Расчётка воздуховодов
+  leader:
+    title: Руководитель
+    grants:
+      - chat.create
+      - chat.view_all        # видеть Чаты всех Менеджеров
+      - action.ask
+      - action.duct_calc
+  admin:
+    title: Администратор
+    grants:
+      - chat.create
+      - chat.view_all
+      - action.ask
+      - action.duct_calc
