@@ -126,33 +126,29 @@ def run_showcase(api: Api, users: dict[str, str], config: dict) -> None:
 # --- замер ---
 
 
-def _red(font) -> bool:
-    color = font.color if font else None
-    if color is None:
-        return False
-    if color.type == "rgb" and isinstance(color.rgb, str) and len(color.rgb) >= 6:
-        red, green, blue = (int(color.rgb[-6:][i : i + 2], 16) for i in (0, 2, 4))
-        return red >= 0xC0 and green <= 0x60 and blue <= 0x60
-    return color.type == "indexed" and color.indexed in (2, 10)
-
-
 def analyze_xlsx(data: bytes) -> dict:
-    """Строки с данными и строки, где хоть одна непустая ячейка набрана красным шрифтом."""
+    """Позиции первого листа расчётки (строки под шапкой «Номенклатура») и красные из них.
 
-    book = openpyxl.load_workbook(BytesIO(data))
-    sheets = {}
-    for sheet in book.worksheets:
-        rows, red = [], []
-        for row in sheet.iter_rows():
-            cells = [c for c in row if c.value not in (None, "")]
-            if not cells:
-                continue
-            text = " | ".join(str(c.value) for c in cells)
-            rows.append(text)
-            if any(_red(c.font) for c in cells):
-                red.append(text)
-        sheets[sheet.title] = {"rows": len(rows), "red": red, "text": rows}
-    return sheets
+    Красная позиция — та, где расчётка дописала «(проблема: …)» к номенклатуре; так же её находит
+    actions.red_positions. Цвет шрифта не годится: красным набраны и ячейки самого шаблона.
+    """
+
+    sheet = openpyxl.load_workbook(BytesIO(data)).worksheets[0]
+    header: list[str] | None = None
+    rows, red = [], []
+    for row in sheet.iter_rows(values_only=True):
+        if header is None:
+            if any(isinstance(v, str) and v.strip() == "Номенклатура" for v in row):
+                header = [str(v).strip() if v is not None else "" for v in row]
+            continue
+        number, value = row[header.index("№ п/п")], row[header.index("Номенклатура")]
+        if number in (None, "") or not isinstance(value, str) or not value.strip():
+            continue  # строки шаблона без позиции, «ИТОГО», справочник цен ниже
+        text = " ".join(value.replace("\t", " ").split())
+        rows.append(text)
+        if "(проблема:" in text:
+            red.append(text)
+    return {sheet.title: {"rows": len(rows), "red": red, "text": rows}}
 
 
 def _norm(text: str) -> str:
@@ -172,11 +168,17 @@ def compare(expected_data: dict | None, table: dict | None, answer: str) -> dict
         line = _norm(item["line"])
         hits = [r for r in rows if line in _norm(r)]
         in_answer = line in _norm(answer)
-        if not hits and not in_answer:
-            misses.append(f"«{item['line']}»: нет в расчётке")
+        if not hits:
+            if item.get("type", "") is None and not item.get("red"):
+                matched += 1  # заголовок раздела в расчётку и не должен попадать
+            elif in_answer:
+                found += 1
+                misses.append(f"«{item['line']}»: только в тексте ответа, не в расчётке")
+            else:
+                misses.append(f"«{item['line']}»: нет в расчётке")
             continue
         found += 1
-        is_red = any(_norm(r) in red_rows for r in hits) or (not hits and in_answer)
+        is_red = any(_norm(r) in red_rows for r in hits)
         if "red" in item and is_red != item["red"]:
             misses.append(f"«{item['line']}»: {'красная' if is_red else 'не красная'}, ожидалась {'красная' if item['red'] else 'обычная'}")
         else:
