@@ -377,7 +377,11 @@ def create_app(settings_factory=load_settings) -> FastAPI:
             raise HTTPException(403, "Обновлять сайт может администратор или руководитель")
 
     def update_out(settings: Settings) -> dict:
-        return {"status": updates.update_status(settings), "request_stale": updates.request_stale(settings)}
+        return {
+            "status": updates.update_status(settings),
+            "request_stale": updates.request_stale(settings),
+            "in_progress": updates.update_in_progress(settings),
+        }
 
     @app.get("/api/v1/update")
     def update_state(user: UserDep, access: AccessDep, settings: SettingsDep) -> dict:
@@ -389,6 +393,8 @@ def create_app(settings_factory=load_settings) -> FastAPI:
         """То же, что кнопка «Обновить сайт из репозитория»: итог — в GET /api/v1/update."""
 
         require_updater(access, user)
+        if updates.update_in_progress(settings):
+            raise HTTPException(409, "Обновление уже идёт — дождитесь его окончания (GET /api/v1/update)")
         pulled = updates.request_update(settings, user.name)
         return {"harness": pulled, **update_out(settings)}
 

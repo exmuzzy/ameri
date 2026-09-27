@@ -3,7 +3,7 @@ from pathlib import Path
 from ameri import actions
 from ameri.harness import assistant_prompt, load_access
 from ameri.auth import User
-from ameri.store import Store, Usage
+from ameri.store import Attachment, Store, Usage
 
 HARNESS = Path(__file__).resolve().parents[1] / "harness"
 
@@ -89,6 +89,79 @@ def test_odt_text(tmp_path):
     assert actions.odt_text(path) == "Тема: Воздуховоды\nВоздуховод ПП ф160 L1000 | 2 | шт"
 
 
+def _attachment(path: Path) -> Attachment:
+    return Attachment(id=1, name=path.name, path=path, size=path.stat().st_size if path.exists() else 0)
+
+
+def test_attachment_preview_text(tmp_path):
+    path = tmp_path / "note.txt"
+    path.write_text("привет мир", encoding="utf-8")
+    preview = actions.attachment_preview(_attachment(path))
+    assert preview.kind == "text"
+    assert preview.text == "привет мир"
+    assert not preview.truncated
+
+
+def test_attachment_preview_image_and_pdf_by_suffix(tmp_path):
+    image = tmp_path / "photo.png"
+    image.write_bytes(b"\x89PNG\r\n")
+    assert actions.attachment_preview(_attachment(image)).kind == "image"
+
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    assert actions.attachment_preview(_attachment(pdf)).kind == "pdf"
+
+
+def test_attachment_preview_unsupported_for_legacy_doc(tmp_path):
+    path = tmp_path / "старый.doc"
+    path.write_bytes(b"\xd0\xcf\x11\xe0")
+    assert actions.attachment_preview(_attachment(path)).kind == "unsupported"
+
+
+def test_attachment_preview_docx(tmp_path):
+    from docx import Document
+
+    path = tmp_path / "spec.docx"
+    document = Document()
+    document.add_paragraph("Раздел 1")
+    document.add_paragraph("Воздуховод ф160")
+    document.save(path)
+    preview = actions.attachment_preview(_attachment(path))
+    assert preview.kind == "text"
+    assert preview.text == "Раздел 1\nВоздуховод ф160"
+
+
+def test_attachment_preview_xlsx(tmp_path):
+    from openpyxl import Workbook
+
+    path = tmp_path / "spec.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Наименование", "Кол-во"])
+    sheet.append(["Воздуховод ф160", 2])
+    workbook.save(path)
+    preview = actions.attachment_preview(_attachment(path))
+    assert preview.kind == "table"
+    assert preview.rows == [["Наименование", "Кол-во"], ["Воздуховод ф160", "2"]]
+    assert not preview.truncated
+
+
+def test_attachment_preview_odt(tmp_path):
+    import zipfile
+
+    content = (
+        '<office:document-content xmlns:office="o" xmlns:text="t"><office:body><office:text>'
+        "<text:p>Тема: Воздуховоды</text:p>"
+        "</office:text></office:body></office:document-content>"
+    )
+    path = tmp_path / "spec.odt"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("content.xml", content)
+    preview = actions.attachment_preview(_attachment(path))
+    assert preview.kind == "text"
+    assert preview.text == "Тема: Воздуховоды"
+
+
 def test_non_ascii_key_gives_clear_message():
     import pytest
     from ameri.llm import BAD_KEY_MESSAGE, DeepSeekChat, LlmError, key_problem
@@ -98,3 +171,58 @@ def test_non_ascii_key_gives_clear_message():
     assert key_problem("sk-abc 123") == BAD_KEY_MESSAGE
     with pytest.raises(LlmError, match="недопустимые символы"):
         DeepSeekChat(base_url="https://x", api_key="sk-вставьте ключ", model="m")
+
+
+def test_spec_lines_from_tables(tmp_path):
+    md = tmp_path / "s.md"
+    md.write_text(
+        "# Приток П2\n\n| № | Наименование | Кол-во | Ед. |\n|---|---|---|---|\n"
+        "| 1 | Воздуховод ПП 400×300 δ=4 | 8 | м |\n| 2 | Отвод 90° ПП ф160 | 2 | шт |\n",
+        encoding="utf-8",
+    )
+    assert actions.spec_lines_text(md).splitlines() == [
+        "Приток П2",
+        "1. Воздуховод ПП 400×300 δ=4 — 8 м; кол-во: 8",
+        "2. Отвод 90° ПП ф160 — 2 шт; кол-во: 2",
+    ]
+    csv_file = tmp_path / "s.csv"
+    csv_file.write_text("№;Наименование;Кол-во;Ед. изм.\n1;Воздуховод ПП ф160 (В1);10;мп\n2;Хомут ф160;4;шт\n", encoding="utf-8")
+    assert actions.spec_lines_text(csv_file).splitlines() == [
+        "1. Воздуховод ПП ф160 (В1) — 10 мп; кол-во: 10",
+        "2. Хомут ф160 — 4 шт; кол-во: 4",
+    ]
+    assert actions.spec_lines_text(tmp_path / "x.xlsx") is None
+
+
+def test_spec_lines_from_odt_keeps_system_headings():
+    demo = Path(__file__).resolve().parents[1] / "demo" / "specs" / "06-ceh-pokraski-v1-p1.odt"
+    lines = actions.spec_lines_text(demo).splitlines()
+    assert lines[0] == "Цех покраски, объект «Восточная площадка»"
+    assert "1. Воздуховод ПП ∅400 δ=4 — 14 мп; система В1; кол-во: 14" in lines
+    assert "9. Решётка ПП 500×400 — 2 шт; система П1; кол-во: 2" in lines
+    assert not any(line.startswith("Система") for line in lines)
+    assert not any("Наименование" in line for line in lines)
+
+
+def test_red_positions_from_result(tmp_path):
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append([None, 1, "Воздуховод ПП ф315\t10\tмп\tКол-во: 10 мп — отрезки по 1500 мм"])
+    sheet.append([None, 2, "Переход ПП ф315\t2\tшт\tКол-во: 2 шт (проблема: Позиция 5: не указан размер d_out)"])
+    sheet.append([None, 3, "Отвод 90° ПП\t3\tшт (проблема: Позиция 6: тип не распознан)"])
+    path = tmp_path / "r.xlsx"
+    book.save(path)
+    assert actions.red_positions(path) == [
+        "«Переход ПП ф315 · 2 · шт» — не указан второй диаметр (выход)",
+        "«Отвод 90° ПП · 3 · шт» — тип не распознан",
+    ]
+    assert actions.red_positions(tmp_path / "нет.xlsx") == []
+
+
+def test_assistant_prompt_includes_parse_rules():
+    prompt = assistant_prompt(HARNESS)
+    assert "Как расчётка понимает строки спецификаций" in prompt
+    assert "Тройник без размера ответвления" in prompt
+    assert prompt.index("Как расчётка понимает") < prompt.index("Примеры правильных")

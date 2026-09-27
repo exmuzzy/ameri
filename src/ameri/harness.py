@@ -61,8 +61,26 @@ def list_examples(harness_dir: Path) -> list[HarnessFile]:
     return _read_dir(harness_dir, EXAMPLES_DIR)
 
 
+PARSE_RULES_FILE = Path("duct_calc") / "parse_rules.md"
+
+
+def duct_parse_rules_for_assistant(harness_dir: Path) -> str:
+    """Правила разбора спецификаций (их же получает расчётка) — чтобы Ассистент отвечал с ними согласованно."""
+
+    path = harness_dir / PARSE_RULES_FILE
+    if not path.is_file():
+        return ""
+    body = path.read_text(encoding="utf-8").strip().split("\n", 1)[-1].strip()  # без заголовка файла
+    return (
+        "## Как расчётка понимает строки спецификаций\n\n"
+        "Эти правила утверждены руководителем и действуют в расчётке. Отвечая о позициях спецификации, "
+        "исходи из них и не предлагай уточнять у клиента то, что здесь уже решено. Поля вида element_type, "
+        "qty, questions — внутренние поля расчётки, менеджеру их не называй.\n\n" + body
+    )
+
+
 def assistant_prompt(harness_dir: Path) -> str:
-    """Системный промпт: основной текст, затем Правила, Примеры и оглавление Материалов отрасли.
+    """Системный промпт: основной текст, Правила, правила разбора расчётки, Примеры, оглавление Материалов отрасли.
 
     Порядок стабилен и не зависит от Чата: DeepSeek кэширует одинаковый префикс
     запросов, поэтому неизменная часть Харнеса дешевле при каждом следующем вызове.
@@ -74,6 +92,9 @@ def assistant_prompt(harness_dir: Path) -> str:
     rules = list_rules(harness_dir)
     if rules:
         parts.append("## Правила, утверждённые руководителем\n\n" + "\n\n".join(r.text for r in rules))
+    parse_rules = duct_parse_rules_for_assistant(harness_dir)
+    if parse_rules:
+        parts.append(parse_rules)
     examples = list_examples(harness_dir)
     if examples:
         parts.append("## Примеры правильных ответов\n\n" + "\n\n".join(e.text for e in examples))

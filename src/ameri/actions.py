@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import tempfile
 import zipfile
@@ -18,11 +19,14 @@ from .store import Attachment, Message, Usage
 TEXT_SUFFIXES = {".md", ".txt", ".csv"}
 PARSED_SUFFIXES = {".xlsx", ".docx", ".doc"}
 DUCT_SUFFIXES = {".md", ".xlsx", ".docx", ".doc", ".csv", ".odt"}
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
 CONNECTION_TYPES = {"Фланец": "flange", "Раструб": "socket", "Без соединения": "none"}
 DUCT_TEMPLATE_NAME = "шаблон расчетки стоимости воздуховодов.xlsx"
 MAX_FILE_CHARS = 60_000
 # Бюджет истории Чата в символах (~40–50 тыс. токенов): старые сообщения отбрасываются первыми.
 MAX_HISTORY_CHARS = 150_000
+PREVIEW_MAX_CHARS = 20_000
+PREVIEW_MAX_ROWS = 200
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,16 @@ class ActionResult:
     text: str
     files: list[tuple[str, bytes]] = field(default_factory=list)
     usage: Usage | None = None
+
+
+@dataclass(frozen=True)
+class AttachmentPreview:
+    """Предпросмотр вложения в Чате: без обращения к DeepSeek или прототипу duct-calc."""
+
+    kind: str  # "image" | "pdf" | "text" | "table" | "unsupported"
+    text: str = ""
+    rows: list[list[str]] = field(default_factory=list)
+    truncated: bool = False
 
 
 def _odt_node_text(node: ET.Element) -> str:
@@ -75,6 +89,157 @@ def odt_text(path: Path) -> str:
     return "\n".join(lines)
 
 
+HEADER_WORDS = ("наименование", "кол-во", "количество", "ед.", "ед ", "единица", "позиция", "примечание")
+INDEX_HEADERS = ("№", "n", "no", "№ п/п", "поз.", "поз")
+
+
+def _is_header(cells: list[str]) -> bool:
+    """Шапка таблицы: нет цифр, и хотя бы одна ячейка — «Наименование», «Кол-во», «Ед.»…"""
+
+    text = " ".join(cells).lower()
+    return not any(ch.isdigit() for ch in text) and any(
+        cell.lower().strip().startswith(HEADER_WORDS) or cell.strip().lower() in INDEX_HEADERS for cell in cells
+    )
+
+
+def table_lines(rows: list[list[str]]) -> list[tuple[str, str | None]]:
+    """Строки таблицы спецификации — (текст «Наименование — количество ед.», количество).
+
+    Шапка и колонка с номером строки убираются: модель разбора путает их с позициями
+    и с количеством. Строка из одной ячейки — заголовок раздела, количество у неё None.
+    """
+
+    lines: list[tuple[str, str | None]] = []
+    index_column = False
+    for raw in rows:
+        cells = [" ".join(str(cell).split()) for cell in raw]
+        cells = [cell for cell in cells if cell]
+        if not cells:
+            continue
+        if _is_header(cells):
+            index_column = cells[0].strip().lower() in INDEX_HEADERS
+            continue
+        if index_column and len(cells) > 1 and cells[0].rstrip(".").isdigit():
+            cells = cells[1:]
+        if len(cells) == 1:
+            lines.append((cells[0], None))
+            continue
+        quantity = next((c.replace(",", ".") for c in cells[1:] if re.fullmatch(r"\d+(?:[.,]\d+)?", c)), None)
+        lines.append((f"{cells[0]} — {' '.join(cells[1:])}", quantity))
+    return lines
+
+
+def _markdown_rows(text: str) -> list[list[str] | str]:
+    """Строки Markdown: строка таблицы — список ячеек, остальное — текст без разметки заголовка."""
+
+    items: list[list[str] | str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("|"):
+            cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+            if all(set(cell) <= set("-: ") for cell in cells):
+                continue  # разделитель |---|---|
+            items.append(cells)
+        elif stripped:
+            items.append(stripped.lstrip("#").strip())
+    return items
+
+
+SYSTEM_HEADING = re.compile(r"^система\s+\S+", re.IGNORECASE)
+
+
+def spec_lines_text(path: Path) -> str | None:
+    """Спецификация из .md, .odt или .csv — нумерованными строками для прототипа; None — формат не наш.
+
+    С номерами («1. …») прототип делит текст на позиции сам, без модели; строки без номера
+    (заголовок документа, «Система В1») в позиции не попадают. Колонку «СИСТЕМА» прототип
+    берёт из строки позиции, поэтому система из заголовка раздела дописывается в каждую строку.
+    """
+
+    import csv
+    import io
+
+    suffix = path.suffix.lower()
+    if suffix == ".csv":
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+        dialect = csv.Sniffer().sniff(text[:4096], delimiters=";,\t") if text.strip() else csv.excel
+        items: list[list[str] | str] = list(csv.reader(io.StringIO(text), dialect))
+    elif suffix == ".odt":
+        items = [line.split(" | ") if " | " in line else line for line in odt_text(path).splitlines()]
+    elif suffix == ".md":
+        items = _markdown_rows(path.read_text(encoding="utf-8", errors="replace"))
+    else:
+        return None
+
+    rows: list[tuple[str, str | None]] = []
+    table: list[list[str]] = []
+    for item in [*items, ""]:
+        if isinstance(item, list):
+            table.append(item)
+            continue
+        rows += table_lines(table)
+        table = []
+        if item:
+            rows.append((item, None))
+
+    heading: list[str] = []
+    lines: list[str] = []
+    system = ""
+    for text, quantity in rows:
+        if quantity is None and " — " not in text:
+            # Заголовок — строка вне таблицы или из одной ячейки. Первые — шапка документа
+            # до позиций, «Система …» — раздел; остальные в позиции не попадают.
+            if SYSTEM_HEADING.match(text):
+                system = "система " + text.split(None, 1)[1].rstrip(".:;, ")
+            elif not lines:
+                heading.append(text)
+            continue
+        line = f"{len(lines) + 1}. {text}"
+        if system:
+            line += f"; {system}"  # прототип берёт метку системы до ближайшей «;»
+        if quantity is not None:
+            line += f"; кол-во: {quantity}"
+        lines.append(line)
+    return "\n".join(heading + lines)
+
+
+PROBLEM_FIELDS = {
+    "d_out": "второй диаметр (выход)",
+    "d_dome": "диаметр купола",
+    "length_mm": "длина изделия, мм",
+    "branch_d": "диаметр ответвления",
+}
+
+
+def red_positions(xlsx: Path, limit: int = 20) -> list[str]:
+    """Позиции, которые расчётка пометила «(проблема: …)», — для ответа в Чате."""
+
+    import re
+
+    import openpyxl
+
+    try:
+        sheet = openpyxl.load_workbook(xlsx, read_only=True).worksheets[0]
+    except Exception:  # noqa: BLE001 - без списка ответ всё равно полезен
+        return []
+    found: list[str] = []
+    for row in sheet.iter_rows(values_only=True):
+        for value in row:
+            if not isinstance(value, str) or "(проблема:" not in value:
+                continue
+            text, _, reason = value.partition("(проблема:")
+            text = " ".join(text.replace("\t", " · ").split())
+            text = re.sub(r"\s*·\s*Кол-во:.*$", "", text)
+            reason = re.sub(r"^\s*Позиция\s*\d*:\s*", "", reason.strip().rstrip(")"))
+            for field, title in PROBLEM_FIELDS.items():
+                reason = reason.replace(f"размер {field}", title).replace(f"длина {field}", title).replace(field, title)
+            found.append(f"«{text[:90]}» — {reason}")
+            break
+    if len(found) > limit:
+        found = found[:limit] + [f"…и ещё {len(found) - limit}"]
+    return found
+
+
 def duct_calc_available(duct_calc_dir: Path | None) -> bool:
     return bool(
         duct_calc_dir
@@ -112,6 +277,57 @@ def attachment_text(attachment: Attachment, duct_calc_dir: Path | None) -> str:
     if not text:
         return f"[Файл {attachment.name}: содержимое недоступно ассистенту]"
     return f"[Файл {attachment.name}]\n{text[:MAX_FILE_CHARS]}"
+
+
+def _docx_text(path: Path) -> str:
+    from docx import Document
+
+    return "\n".join(p.text for p in Document(path).paragraphs)
+
+
+def _xlsx_rows(path: Path) -> list[list[str]]:
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheet = workbook.active
+        return [
+            ["" if cell is None else str(cell) for cell in row]
+            for row in sheet.iter_rows(max_row=PREVIEW_MAX_ROWS + 1, values_only=True)
+        ]
+    finally:
+        workbook.close()
+
+
+def attachment_preview(attachment: Attachment) -> AttachmentPreview:
+    """Предпросмотр вложения в Чате, независимо от прототипа duct-calc.
+
+    Картинки и PDF показываются как есть, текстовые форматы и .odt — текстом,
+    .xlsx — таблицей; для .doc (старый бинарный формат) и прочего показывается
+    только сообщение о недоступности предпросмотра.
+    """
+
+    suffix = attachment.path.suffix.lower()
+    try:
+        if suffix in IMAGE_SUFFIXES:
+            return AttachmentPreview(kind="image")
+        if suffix == ".pdf":
+            return AttachmentPreview(kind="pdf")
+        if suffix in TEXT_SUFFIXES:
+            text = attachment.path.read_text(encoding="utf-8", errors="replace")
+            return AttachmentPreview(kind="text", text=text[:PREVIEW_MAX_CHARS], truncated=len(text) > PREVIEW_MAX_CHARS)
+        if suffix == ".odt":
+            text = odt_text(attachment.path)
+            return AttachmentPreview(kind="text", text=text[:PREVIEW_MAX_CHARS], truncated=len(text) > PREVIEW_MAX_CHARS)
+        if suffix == ".docx":
+            text = _docx_text(attachment.path)
+            return AttachmentPreview(kind="text", text=text[:PREVIEW_MAX_CHARS], truncated=len(text) > PREVIEW_MAX_CHARS)
+        if suffix == ".xlsx":
+            rows = _xlsx_rows(attachment.path)
+            return AttachmentPreview(kind="table", rows=rows[:PREVIEW_MAX_ROWS], truncated=len(rows) > PREVIEW_MAX_ROWS)
+    except Exception:  # noqa: BLE001 - предпросмотр не должен ронять страницу
+        return AttachmentPreview(kind="unsupported")
+    return AttachmentPreview(kind="unsupported")
 
 
 def ask_assistant(
@@ -238,35 +454,61 @@ def duct_calc(
     client = DeepSeekClient(ModelClientConfig(base_url=base_url, api_key=api_key, model=model))
     with tempfile.TemporaryDirectory() as tmp:
         output = Path(tmp) / f"расчетка_{spec.path.stem}.xlsx"
-        source = spec.path
-        if source.suffix.lower() == ".odt":
-            # Прототип не читает OpenDocument: передаём ему текст документа как Markdown.
+        template = duct_calc_dir / "data" / DUCT_TEMPLATE_NAME
+        connection = CONNECTION_TYPES[connection_label]
+
+        def run_lines() -> tuple[object, str]:
+            # Таблицы .md/.odt/.csv прототип разбирает хуже, чем строки заказа Word: передаём ему
+            # спецификацию построчно «Наименование — количество ед.», без шапки и номеров строк.
             source = Path(tmp) / f"{spec.path.stem}.md"
-            source.write_text(odt_text(spec.path), encoding="utf-8")
+            source.write_text(spec_lines_text(spec.path) or "", encoding="utf-8")
+            result = run_specification_pipeline(
+                source_path=source,
+                output_path=output,
+                connection_type=connection,
+                template_path=template,
+                model_client=client,
+            )
+            return result, f"Позиций: {result.completeness.model_position_count}."
+
+        suffix = spec.path.suffix.lower()
         try:
-            if source.suffix.lower() == ".csv":
+            if suffix == ".csv":
+                # Сначала CSV-модуль прототипа (свой формат выгрузки); обычную таблицу он не читает.
                 from duct_calc.csv_pipeline import run_csv_pipeline
 
-                result = run_csv_pipeline(
-                    source_path=source,
-                    output_path=output,
-                    connection_type=CONNECTION_TYPES[connection_label],
-                    template_path=duct_calc_dir / "data" / DUCT_TEMPLATE_NAME,
-                    model_client=client,
-                )
-                summary = f"Позиций: {result.source_item_count}, строк в расчётке: {result.output_row_count}."
+                try:
+                    result = run_csv_pipeline(
+                        source_path=spec.path,
+                        output_path=output,
+                        connection_type=connection,
+                        template_path=template,
+                        model_client=client,
+                    )
+                    summary = f"Позиций: {result.source_item_count}, строк в расчётке: {result.output_row_count}."
+                except (ValueError, KeyError) as error:
+                    if isinstance(error, PipelineNeedsInput):
+                        raise
+                    result, summary = run_lines()
+            elif suffix in {".md", ".odt"}:
+                result, summary = run_lines()
             else:
                 result = run_specification_pipeline(
-                    source_path=source,
+                    source_path=spec.path,
                     output_path=output,
-                    connection_type=CONNECTION_TYPES[connection_label],
-                    template_path=duct_calc_dir / "data" / DUCT_TEMPLATE_NAME,
+                    connection_type=connection,
+                    template_path=template,
                     model_client=client,
                 )
                 summary = f"Позиций: {result.completeness.model_position_count}."
         except PipelineNeedsInput as error:
             return ActionResult(text=f"Нужно уточнение, расчётка не построена: {error}")
         lines = [f"Расчётка по файлу «{spec.name}» готова ({connection_label.lower()}). {summary}"]
+        red = red_positions(output)
+        if red:
+            lines.append(
+                "Красные позиции — не посчитаны, нужно уточнить:\n" + "\n".join(f"- {item}" for item in red)
+            )
         if result.warnings:
             lines.append("Предупреждения: " + "; ".join(result.warnings))
         return ActionResult(text="\n\n".join(lines), files=[(output.name, output.read_bytes())])
