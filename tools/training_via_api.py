@@ -9,6 +9,7 @@ AMERI_TRAINING_LEADER_PASSWORD; завести пользователей — `s
     python tools/training_via_api.py run --phase after        # то же в чатах «[После обучения] …»
     python tools/training_via_api.py measure --phase before   # XLSX → красные строки → demo/training/results/
     python tools/training_via_api.py showcase                 # витринные чаты «[Витрина] …»
+    python tools/training_via_api.py examples                 # примеры переписок «[Пример] …» (demo/examples/)
     python tools/training_via_api.py note --chat "<название>" --text "…" [--as leader]
     python tools/training_via_api.py like --chat "<название>" --comment "…"   # 👍 последнему ответу
     python tools/training_via_api.py report                   # таблица «до/после» в Markdown
@@ -35,7 +36,8 @@ from demo_via_api import DEFAULT_URL, POST_TIMEOUT, Api, env, last_answer, log, 
 ROOT = Path(__file__).resolve().parents[1]
 TRAINING = ROOT / "demo" / "training"
 RESULTS = TRAINING / "results"
-PREFIX = {"before": "[До обучения]", "after": "[После обучения]", "showcase": "[Витрина]"}
+PREFIX = {"before": "[До обучения]", "after": "[После обучения]", "showcase": "[Витрина]", "example": "[Пример]"}
+EXAMPLES = ROOT / "demo" / "examples" / "scenarios.yaml"
 ACTIONS = {"ask": "Вопрос ассистенту", "duct_calc": "Расчётка воздуховодов", "note": None}
 
 
@@ -106,9 +108,9 @@ def run_phase(api: Api, users: dict[str, str], config: dict, phase: str) -> None
             post(api, manager, chat["id"], text=item["text"], action="ask")
 
 
-def run_showcase(api: Api, users: dict[str, str], config: dict) -> None:
-    for item in config.get("showcase", []):
-        chat = new_chat(api, users["manager"], f"{PREFIX['showcase']} {item['title']}")
+def run_showcase(api: Api, users: dict[str, str], items: list[dict], prefix: str = PREFIX["showcase"]) -> None:
+    for item in items:
+        chat = new_chat(api, users["manager"], f"{prefix} {item['title']}")
         if not chat:
             continue
         for step in item["steps"]:
@@ -117,7 +119,8 @@ def run_showcase(api: Api, users: dict[str, str], config: dict) -> None:
                 answer = last_answer(api, who, chat["id"])
                 if answer:
                     api.request(who, "POST", f"/messages/{answer['id']}/feedback", json=step["feedback"])
-                    log(f"  {who} 👍 ответ #{answer['id']}")
+                    mark = "👍" if step["feedback"].get("rating") == 1 else "👎 и исправление"
+                    log(f"  {who} {mark} ответ #{answer['id']}")
                 continue
             files = [ROOT / f for f in step.get("files", [])]
             post(api, who, chat["id"], text=step["text"], action=step["action"], connection=step.get("connection", "none"), files=files)
@@ -255,7 +258,7 @@ def report() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["setup-users", "run", "measure", "showcase", "note", "like", "report"])
+    parser.add_argument("command", choices=["setup-users", "run", "measure", "showcase", "examples", "note", "like", "report"])
     parser.add_argument("--phase", choices=["before", "after"], default="before")
     parser.add_argument("--url", default=DEFAULT_URL)
     parser.add_argument("--chat")
@@ -278,7 +281,10 @@ def main() -> None:
     elif args.command == "measure":
         measure(api, users, config, args.phase)
     elif args.command == "showcase":
-        run_showcase(api, users, config)
+        run_showcase(api, users, config.get("showcase", []))
+    elif args.command == "examples":
+        examples = yaml.safe_load(EXAMPLES.read_text(encoding="utf-8"))["examples"]
+        run_showcase(api, users, examples, PREFIX["example"])
     else:
         who = users[args.who]
         chat = find_chat(api, users["leader"], args.chat)

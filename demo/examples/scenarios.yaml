@@ -1,0 +1,231 @@
+# Примеры переписок «[Пример] <title>» на рабочем сайте: исполнитель — tools/training_via_api.py examples.
+# Файлы — demo/examples/<имя>/spec.* (demo/examples/build_specs.py). Всё вымышлено: компании, объекты, люди.
+# Каждый пример показывает аспект, которого нет в демо-чатах (demo/scenarios.yaml) и замерах обучения.
+# Шаг — сообщение (as, action, text, files, connection) или оценка последнего ответа ассистента (as, feedback).
+
+examples:
+  - title: "Письмо клиента в тексте — сначала перечень, потом расчётка"
+    steps:
+      - as: manager
+        action: ask
+        text: >-
+          Клиент прислал письмо без вложений: «Нужна вытяжка: труба ПП ф250 примерно 18 метров, четыре поворота
+          на 90, два перехода на ф200 и ещё метров шесть ф200, на выбросе зонт». Собери из этого перечень позиций
+          для расчётки и скажи, чего не хватает.
+      - as: manager
+        action: duct_calc
+        connection: socket
+        files: [demo/examples/pismo/spec.md]
+        text: "Перечень из письма оформил файлом. Посчитай, раструб."
+
+  - title: "Утка со смещением в одной и двух плоскостях"
+    steps:
+      - as: manager
+        action: duct_calc
+        connection: flange
+        files: [demo/examples/utka/spec.xlsx]
+        text: "Приток П3 на фланцах, есть утки. Посчитай."
+      - as: manager
+        action: ask
+        text: "Как расчётка поняла утку со смещением «200 и 150»? Это одна утка или две?"
+
+  - title: "Островной зонт над ванной с полными размерами"
+    steps:
+      - as: manager
+        action: duct_calc
+        connection: flange
+        files: [demo/examples/zont-vanna/spec.xlsx]
+        text: "Местные отсосы над ваннами. Посчитай на фланцах."
+      - as: manager
+        action: ask
+        text: "Что нужно узнать у клиента про пристенный зонт, чтобы его посчитать?"
+
+  - title: "Воздуховоды в м² из сметы"
+    steps:
+      - as: manager
+        action: duct_calc
+        connection: socket
+        files: [demo/examples/ploshchad/spec.xlsx]
+        text: "Клиент прислал смету, воздуховоды в квадратных метрах. Посчитай, раструб."
+      - as: manager
+        action: ask
+        text: "Как расчётка перевела м² в метры и почему последняя строка на уточнении?"
+
+  - title: "Стенка 12 мм — почему без цены"
+    steps:
+      - as: manager
+        action: duct_calc
+        connection: flange
+        files: [demo/examples/tolshchina/spec.xlsx]
+        text: "Газоход от скруббера, часть с усиленной стенкой. Посчитай на фланцах."
+      - as: manager
+        action: ask
+        text: "Почему воздуховод и отвод с δ=12 попали в расчётку без цены? Что с ними делать?"
+
+  - title: "Вентилятор компании в заявке на воздуховоды"
+    steps:
+      - as: manager
+        action: duct_calc
+        connection: socket
+        files: [demo/examples/ventilyator/spec.xlsx]
+        text: "В заявке вентилятор и воздуховоды. Посчитай воздуховоды, раструб."
+      - as: manager
+        action: ask
+        text: >-
+          Вентилятор мы делаем сами — как его подать в КП вместе с воздуховодами и что сказать клиенту про гибкие
+          вставки и виброизоляторы?
+
+  - title: "«Аналог ХИМВЕНТ» — своё или покупное"
+    steps:
+      - as: manager
+        action: duct_calc
+        connection: socket
+        files: [demo/examples/khimvent/spec.xlsx]
+        text: "Клиент просит аналоги. Посчитай, раструб."
+      - as: leader
+        action: note
+        text: >-
+          Руководитель: строки «аналог ХИМВЕНТ» расчётка перенесла без расчёта — слово «химвент» у неё в списке
+          покупных. Это открытый вопрос Q51; пока считаем такие позиции вручную как свои воздуховоды.
+
+  - title: "Сокращения монтажника: «возд-д», «отв.», «тр-к»"
+    steps:
+      - as: manager
+        action: duct_calc
+        connection: socket
+        files: [demo/examples/sokrashcheniya/spec.xlsx]
+        text: "Спецификация от монтажников, одни сокращения. Посчитай, раструб."
+      - as: manager
+        action: ask
+        text: "Все ли сокращения расчётка поняла правильно? Что проверить глазами?"
+
+  - title: "Прямоугольный тройник и переход 800х400/600х300"
+    steps:
+      - as: manager
+        action: duct_calc
+        connection: flange
+        files: [demo/examples/pryamougolnye/spec.xlsx]
+        text: "Прямоугольная система, фланцы. Посчитай."
+
+  - title: "Дефлектор и зонты с размером купола"
+    steps:
+      - as: manager
+        action: duct_calc
+        connection: socket
+        files: [demo/examples/deflektor/spec.xlsx]
+        text: "Выбросы на кровле: дефлектор и два зонта, купол указан. Посчитай, раструб."
+      - as: manager
+        action: ask
+        text: "Клиент спрашивает, чем дефлектор лучше зонта на выбросе. Что ответить коротко?"
+
+  - title: "Щёлочь и гипохлорит в одной вытяжке"
+    steps:
+      - as: manager
+        action: ask
+        text: >-
+          Клиент — очистные сооружения: ванна с едким натром 20 % и ёмкость с гипохлоритом натрия, общая вытяжка,
+          до 35 °C. Подойдёт ПП?
+      - as: manager
+        action: ask
+        text: "А если гипохлорит вынести на отдельную вытяжку?"
+
+  - title: "Пищевое производство: можно ли ПП"
+    steps:
+      - as: manager
+        action: ask
+        text: >-
+          Клиент — молочный цех, вытяжка над мойкой оборудования (щелочная мойка, пар до 70 °C). Спрашивает,
+          можно ли ПП на пищевом производстве и какие документы нужны.
+
+  - title: "Транзит через коридор: пожарные нормы"
+    steps:
+      - as: manager
+        action: ask
+        text: >-
+          Проектировщик хочет провести воздуховод из ПП из лаборатории через общий коридор в венткамеру.
+          Это допустимо по нормам? Что ему ответить?
+
+  - title: "Пар 90 °C: выдержит ли ПП"
+    steps:
+      - as: manager
+        action: ask
+        text: "Вытяжка от автоклава, влажный воздух до 90 °C, иногда пар. Можно из ПП или нужен другой материал?"
+
+  - title: "ПНД или ПП на кровле"
+    steps:
+      - as: manager
+        action: ask
+        text: >-
+          Участок трассы 12 метров идёт по кровле, Новосибирск. Клиент спрашивает, из чего делать — из ПП или ПНД,
+          и нужна ли защита от солнца.
+
+  - title: "Персональные данные в письме клиента"
+    steps:
+      - as: manager
+        action: ask
+        text: >-
+          Переслал письмо клиента: «Иванов Пётр Сергеевич, моб. 8-900-000-00-00, почта petr@example.ru. Нужно
+          10 м воздуховода ПП ф200 и 3 отвода». Составь ответ клиенту с вопросами по заявке.
+      - as: manager
+        action: note
+        text: "Удалил из заявки контакты клиента, дальше работаем без них."
+
+  - title: "Руководитель исправляет ответ: длина тройника по КП"
+    steps:
+      - as: manager
+        action: ask
+        text: "Какой длины будет тройник ф250 с врезкой ф160, если в заявке длина не указана?"
+      - as: leader
+        feedback:
+          rating: -1
+          comment: "Не по нашему КП."
+          corrected_text: >-
+            В нашем КП тройник ф250 с врезкой ф160 — L 450 мм (так в КП на запрос химлаборатории). Расчётка без
+            длины в заявке пока подставляет врезку + 500 мм = 660 мм, поэтому такую строку проверьте вручную.
+            Это открытый вопрос руководителю Q52.
+          rule_text: >-
+            Длину тройника без размера в заявке бери из КП компании (ф250 с врезкой ф160 — L 450 мм); если в
+            расчётке другая длина — предупреди менеджера.
+      - as: manager
+        action: note
+        text: "Понял, поправлю длину тройника в расчётке вручную."
+
+  - title: "Письмо клиенту по красным позициям"
+    steps:
+      - as: manager
+        action: duct_calc
+        connection: socket
+        files: [demo/examples/krasnye/spec.xlsx]
+        text: "Неполная спецификация из моечной. Посчитай, раструб."
+      - as: manager
+        action: ask
+        text: "Составь короткое письмо клиенту: что уточнить по красным позициям, списком."
+
+  - title: "Два варианта соединения: раструб и фланец"
+    steps:
+      - as: manager
+        action: duct_calc
+        connection: socket
+        files: [demo/examples/varianty/spec.xlsx]
+        text: "Клиент хочет сравнить варианты. Сначала раструб."
+      - as: manager
+        action: duct_calc
+        connection: flange
+        files: [demo/examples/varianty/spec.xlsx]
+        text: "Теперь тот же список на фланцах."
+      - as: manager
+        action: ask
+        text: "Чем для клиента отличаются варианты на раструбе и на фланцах, кроме цены? Коротко."
+
+  - title: "Заявка по эскизу без размеров"
+    steps:
+      - as: manager
+        action: ask
+        text: >-
+          Клиент прислал заявку по эскизу (файл ниже будет), размеров почти нет. Что нужно спросить, чтобы
+          посчитать?
+      - as: manager
+        action: duct_calc
+        connection: socket
+        files: [demo/examples/po-chertezhu/spec.docx]
+        text: "Попробуй посчитать, что есть. Раструб."
