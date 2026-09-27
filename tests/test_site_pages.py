@@ -63,6 +63,27 @@ def test_chat_answer_links_open_material_sections(site):
     assert ("Кислоты", "materials", "doc=chemical-resistance&section=acids") in links
 
 
+def test_attachment_has_download_and_preview(site):
+    chat_id = site.create_chat("Спецификация", "anna")
+    site.add_message(
+        chat_id,
+        author="anna",
+        role="user",
+        content="вопрос",
+        files=[("note.txt", "привет мир".encode("utf-8"))],
+    )
+    at = open_app(chat=str(chat_id))
+    assert not at.exception
+    assert [d.label for d in at.download_button] == ["note.txt (1 КБ)"]
+    preview_bodies = [
+        child.proto.body
+        for block in at.get("popover")
+        for child in block.children.values()
+        if hasattr(child.proto, "body")
+    ]
+    assert "привет мир" in preview_bodies
+
+
 def test_materials_page_shows_linked_section(site):
     at = open_app("materials", doc="chemical-resistance", section="acids")
     assert not at.exception

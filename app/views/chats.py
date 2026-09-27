@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from contextlib import nullcontext
 
 import streamlit as st
@@ -9,7 +10,7 @@ import streamlit as st
 from ameri import actions, chat_service
 from ameri.chat_service import ACTION_DUCT, ACTION_NOTE
 from ameri.materials import split_links
-from ameri.store import Chat, Feedback, Message
+from ameri.store import Attachment, Chat, Feedback, Message
 
 from views.common import current_user, display_name, get_access, get_materials, get_settings, get_store, get_users
 
@@ -119,6 +120,32 @@ def _review_controls(chat: Chat, message: Message) -> None:
                 st.rerun()
 
 
+def _render_attachment_preview(attachment: Attachment) -> None:
+    preview = actions.attachment_preview(attachment)
+    if preview.kind == "image":
+        st.image(str(attachment.path))
+    elif preview.kind == "pdf":
+        encoded = base64.b64encode(attachment.path.read_bytes()).decode()
+        st.markdown(
+            f'<iframe src="data:application/pdf;base64,{encoded}" '
+            'width="100%" height="600" style="border:none"></iframe>',
+            unsafe_allow_html=True,
+        )
+    elif preview.kind == "text":
+        st.text(preview.text or "(пустой файл)")
+        if preview.truncated:
+            st.caption("Показана часть файла — скачайте, чтобы увидеть целиком.")
+    elif preview.kind == "table":
+        if preview.rows:
+            st.dataframe(preview.rows, hide_index=True)
+        else:
+            st.caption("Лист пуст.")
+        if preview.truncated:
+            st.caption("Показаны первые строки — скачайте файл, чтобы увидеть целиком.")
+    else:
+        st.caption("Предпросмотр недоступен для этого типа файла — скачайте, чтобы посмотреть.")
+
+
 def _render_message(chat: Chat, message: Message, feedback: list[Feedback], can_review: bool) -> None:
     is_correction = message.action == "Исправление руководителя"
     avatar = ":material/verified_user:" if is_correction else None
@@ -143,13 +170,18 @@ def _render_message(chat: Chat, message: Message, feedback: list[Feedback], can_
                 )
         for attachment in message.attachments:
             if attachment.path.is_file():
-                st.download_button(
+                col_download, col_preview = st.columns([5, 1])
+                col_download.download_button(
                     f"{attachment.name} ({attachment.size // 1024 + 1} КБ)",
                     data=attachment.path.read_bytes(),
                     file_name=attachment.name,
                     key=f"file-{attachment.id}",
                     icon=":material/attach_file:",
                 )
+                with col_preview.popover(
+                    "Просмотр", icon=":material/visibility:", help="Предпросмотр файла", key=f"preview-{attachment.id}"
+                ):
+                    _render_attachment_preview(attachment)
         if feedback:
             st.caption(_feedback_badges(feedback))
         if can_review and message.role == "assistant" and message.author == "assistant":
