@@ -101,6 +101,10 @@ if access.can(user, "stats.view"):
     lead.append(st.Page(quality.render, title="Качество", icon=":material/monitoring:", url_path="quality"))
 if access.can(user, "harness.edit"):
     lead.append(st.Page(harness_page.render, title="Харнес", icon=":material/rule:", url_path="harness"))
+if access.can(user, "harness.edit") or user.role == "admin":
+    lead.append(
+        st.Page(howto.render_questions, title="Вопросы по расчёту", icon=":material/help:", url_path="questions")
+    )
 if user.role == "admin":
     lead.append(st.Page(admin.render, title="Настройки", icon=":material/settings:", url_path="settings"))
 st.session_state["pages"] = {"chats": chats_page, "materials": materials_page}

@@ -31,6 +31,7 @@ app/views/admin.py          «Настройки»: обновление, клю
 app/views/api_access.py     «Доступ к API»: личные токены (store.api_tokens, в базе — хэш)
 app/views/updates.py        кнопка «Обновить сайт» и статус обновления (логика — src/ameri/updates.py)
 app/views/about.py, howto.py  статьи из docs/site/*.md («Как учится ассистент» — howto.render_assistant)
+                            «Вопросы по расчёту» (руководителю) — howto.render_questions, docs/site/questions.md
 app/views/materials.py      «Материалы отрасли»: поиск, документ, раздел по ссылке ?doc=&section=
 src/ameri/store.py          SQLite: chats, messages, attachments, feedback, onboarding; миграции
 src/ameri/auth.py           users.toml, scrypt-хэши, save_users
@@ -94,4 +95,4 @@ DEEPSEEK_API_KEY=... AMERI_DUCT_CALC_DIR=/путь/к/duct-calc python tools/run
 - DeepSeek: для ответов в чате `thinking` выключен (иначе `temperature` игнорируется); `total_cost` не считаем по ценам Anthropic — только по `usage`.
 - Ссылки на разделы материалов — `/materials?doc=<id>&section=<id>`. В чате `materials.split_links` превращает их в `st.page_link`: обычная Markdown-ссылка открыла бы новую вкладку без входа.
 - Ключевые слова `params.yaml` прототип ищет как подстроки: слово не должно встречаться в названиях своих изделий (`tests/test_duct_params.py`).
-- Открытые вопросы по правилам расчёта — Q37–Q41 в `docs/decisions.md` и Q42–Q51 в `docs/harness-proposals.md`; не реализуй их догадкой.
+- Открытые вопросы по правилам расчёта — Q37–Q41 в `docs/decisions.md` и Q42–Q51 в `docs/harness-proposals.md`; не реализуй их догадкой. Руководитель видит их на странице «Вопросы по расчёту» (`docs/site/questions.md`): решил вопрос — обнови там строку «Сейчас» и сводку.
