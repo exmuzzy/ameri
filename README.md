@@ -212,6 +212,7 @@ curl -fsSL https://raw.githubusercontent.com/exmuzzy/ameri/master/deploy/bootstr
 2. Сайт создаёт файл-заявку `/srv/ameri/data/update-request`; systemd (`ameri-update.path`) запускает `deploy/autoupdate.sh`.
 3. Скрипт берёт `origin/master`. Если изменились только `harness/`, `docs/`, `README.md`, `CONTEXT.md` — всё. Если изменился код — копия базы в `backups/`, `docker compose up -d --build`, сайт перезапускается (пара минут, страницы переподключатся сами).
 4. Итог (версия, время, кто запросил, успех/ошибка) показывается рядом с кнопкой; журнал — `/var/log/ameri-update.log`.
+5. Пока обновление идёт (заявка ждёт службу или идёт пересборка), кнопка неактивна у всех и показывает «Идёт обновление…», статус обновляется сам каждые 5 секунд; `POST /api/v1/update` в это время отвечает 409. Если служба не запущена (заявка висит больше 2 минут) или упала посреди пересборки (статус «running» дольше 30 минут), кнопка снова становится доступной.
 
 Без кнопки: `ssh root@159.194.254.146 /srv/ameri/app/deploy/autoupdate.sh`.
 
