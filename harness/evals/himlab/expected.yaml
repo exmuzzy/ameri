@@ -2,7 +2,7 @@ title: Вытяжка из химлаборатории (xlsx, единицы «
 source: реальный запрос клиента, сентябрь 2026; эталон — КП компании на этот запрос
 connection: socket
 positions:
-  - {line: "Вытяжка из химлаборатории", red: false, type: null}
+  - {line: "Вытяжка из химлаборатории", red: false, type: null, heading: true}
   - {line: "полипропилен ⌀160", red: false, type: straight_round}
   - {line: "полипропилен ⌀200", red: false, type: straight_round}
   - {line: "полипропилен ⌀250", red: false, type: straight_round}

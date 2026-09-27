@@ -2,7 +2,7 @@ title: Заказ пластик, система В1 (docx, соединения
 source: реальный запрос клиента, сентябрь 2026
 connection: socket
 positions:
-  - {line: "Система В1", red: false, type: null}
+  - {line: "Система В1", red: false, type: null, heading: true}
   - {line: "Заглушка ф250", red: false, type: cap_round}
   - {line: "Тройник Ф250/ф250/ф250", red: false, type: tee_round_round}
   - {line: "Прямик ф250 L- 500мм", red: false, type: straight_round}

@@ -42,7 +42,10 @@ def run_case(case_dir: Path, settings, use_harness: bool) -> tuple[int, int, lis
         found = [p for p in preview.positions if item["line"] in p.source_text]
         total += 1
         if not found:
-            lines.append(f"  ✗ «{item['line']}»: позиция не найдена")
+            if item.get("heading"):
+                passed += 1  # заголовок раздела в расчётку не попадает (Q39)
+            else:
+                lines.append(f"  ✗ «{item['line']}»: позиция не найдена")
             continue
         position = found[0]
         problems = []
