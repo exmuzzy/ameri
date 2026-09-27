@@ -244,7 +244,7 @@ curl -fsSL https://raw.githubusercontent.com/exmuzzy/ameri/master/deploy/bootstr
 | Правила и примеры | `harness/rules/`, `harness/examples/` | Руководитель — на сайте (исправления → утверждение) | Сразу |
 | Промпт ассистента | `harness/prompts/assistant.md` | Руководитель — «Харнес» → «Промпт» или в ZCode/Cursor | Сразу / после «Обновить сайт» |
 | Правила разбора и ключевые слова расчёта | `harness/duct_calc/` | В ZCode/Cursor; проверить `tools/run_evals.py` | После «Обновить сайт» |
-| Материалы отрасли | `harness/materials/` | Агент раз в месяц по [prompts/industry-materials.md](prompts/industry-materials.md) или вручную; формат проверяет `pytest` | После «Обновить сайт» |
+| Материалы отрасли | `harness/materials/` | В ZCode/Cursor по `harness/materials/README.md`; формат проверяет `pytest` | После «Обновить сайт» |
 | Статьи | `docs/site/*.md` | В ZCode/Cursor или веб-редакторе GitHub | После «Обновить сайт» |
 | Роли и права | `harness/access.yaml` | В ZCode/Cursor | После «Обновить сайт» |
 | Пользователи, ключ DeepSeek | только на сервере | Администратор — «Настройки» | Сразу |
@@ -301,7 +301,6 @@ DEEPSEEK_API_KEY=... AMERI_DUCT_CALC_DIR=/путь/к/duct-calc streamlit run ap
 - [Промпт для демо-чатов](prompts/demo-chats.md) — задание агенту: 10 демонстрационных чатов
 - [Промпт для исследования отрасли](prompts/industry-research.md) — задание агенту: что узнать об отрасли, чтобы дообучить харнес
 - [Исследование отрасли](docs/industry-research.md) (полные отчёты — [docs/research/industry-2026-09/](docs/research/industry-2026-09/)), [предложения по харнесу](docs/harness-proposals.md), [замеры «до/после обучения»](docs/training-report.md)
-- [Ежемесячное обновление материалов отрасли](prompts/industry-materials.md) — задание агенту
 - [План реализации](docs/plan.md), [протокол решений](docs/decisions.md), [ADR](docs/adr/)
 - [Практики обучения харнеса](docs/practices.md) — цикл учителя, подключение DeepSeek
 - [Исследование](docs/research.md), [выбор VPS](docs/vps.md)
