@@ -235,3 +235,94 @@ def test_assistant_prompt_includes_parse_rules():
     assert "Как расчётка понимает строки спецификаций" in prompt
     assert "Тройник без размера ответвления" in prompt
     assert prompt.index("Как расчётка понимает") < prompt.index("Примеры правильных")
+
+
+# --- Q38 и Q39 поверх прототипа (прототипа в репозитории нет: проверяем на его подобии) ---
+
+from dataclasses import dataclass as _dc, field as _field
+from types import SimpleNamespace as _NS
+
+
+@_dc(frozen=True)
+class _Question:
+    code: str
+    text: str
+
+
+@_dc(frozen=True)
+class _Position:
+    source_no: str
+    source_text: str
+    element_type: str | None = None
+    qty: float | None = None
+    length_mm: float | None = None
+    size: dict = _field(default_factory=dict)
+    questions: tuple = ()
+
+
+def test_round_umbrella_single_size_gets_double_dome():
+    position = _Position("1", "Зонт круглый 250", "umbrella_round", 1, size={"d": 250},
+                         questions=(_Question("missing_size_d_dome", "Не указан диаметр купола"),))
+    fixed = actions.umbrella_with_dome(position)
+    assert fixed.size["d_neck"] == 250 and fixed.size["d_dome"] == 500
+    assert fixed.questions == ()
+    explicit = _Position("2", "Зонт", "umbrella_round", 1, size={"d_neck": 250, "d_dome": 450})
+    assert actions.umbrella_with_dome(explicit).size["d_dome"] == 450
+    square = _Position("3", "Зонт 300х300", "umbrella_square", 1, size={"side_neck": 300})
+    assert actions.umbrella_with_dome(square) is square
+
+
+def test_section_heading_detection():
+    def heading(text, **fields):
+        return actions.is_section_heading(text, _Position("1", text, **fields))
+
+    assert heading("Вытяжка из химлаборатории.")
+    assert heading("Спецификация\tНаименование\tКол-во\tЕд.")
+    assert heading("Приток П2, административный корпус")
+    assert not heading("Переход ф315/ф250")
+    assert not heading("Уголок 45х45х4")
+    assert not heading("Скотч\t2\tшт")
+    assert not heading("Отвод", size={"d": 200})
+    assert not heading("Хомут", qty=2)
+
+
+def test_preview_without_headings_rechecks_completeness():
+    from dataclasses import replace
+
+    heading = _Position("1", "Вытяжка из химлаборатории")
+    duct = _Position("2", "Воздуховод ⌀200 — 2 шт", "straight_round", 2, 1500, {"d": 200})
+    lost = _NS(source_no="3", source_text="Что-то непонятное", position=None, status="problem")
+    item = lambda p: _NS(source_no=p.source_no, source_text=p.source_text, position=p, status="ready")  # noqa: E731
+    message = "В разборе есть позиции без корректного количества"
+    completeness = _NS(source_position_count=3, source_quantity_sum=None, message=message)
+
+    @_dc(frozen=True)
+    class Preview:
+        positions: tuple
+        response: object
+        completeness: object
+        source_position_count: int = 3
+        model_position_count: int = 2
+        model_quantity_sum: float = 2
+        completeness_message: str | None = message
+        warnings: tuple = (message, "другое")
+
+    @_dc(frozen=True)
+    class Response:
+        positions: tuple
+
+    def compare(source, response):
+        count = len(response.positions)
+        ok = all(p.qty is not None for p in response.positions)
+        return _NS(source_position_count=source.position_count, model_position_count=count,
+                   model_quantity_sum=sum(p.qty or 0 for p in response.positions),
+                   message=None if ok and count == source.position_count else "расхождение")
+
+    preview = Preview((item(heading), item(duct), lost), Response((heading, duct)), completeness)
+    fixed = actions.preview_without_headings(preview, compare)
+    assert [p.source_no for p in fixed.positions] == ["2", "3"]  # неразобранная строка не пропала
+    assert fixed.response.positions == (duct,)
+    # Источник: 3 строки минус заголовок = 2, модель вернула 1 позицию — расхождение видно.
+    assert fixed.completeness.source_position_count == 2
+    assert fixed.warnings == ("другое", "расхождение")
+    assert actions.preview_without_headings(replace(preview, positions=(item(duct),)), compare).positions == (item(duct),)
