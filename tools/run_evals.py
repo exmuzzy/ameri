@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -34,9 +35,16 @@ def run_case(case_dir: Path, settings, use_harness: bool) -> tuple[int, int, lis
             base_url=settings.deepseek_base_url, api_key=settings.api_key(), model=settings.deepseek_model
         )
     )
-    preview = preview_specification(
-        source_path=spec, connection_type=expected.get("connection", "none"), model_client=client
-    )
+    # Как на сайте (actions.duct_calc): таблицы прототип получает пронумерованными строками.
+    lines_text = actions.spec_lines_text(spec)
+    with tempfile.TemporaryDirectory() as tmp:
+        source = spec
+        if lines_text is not None:
+            source = Path(tmp) / "spec.md"
+            source.write_text(lines_text, encoding="utf-8")
+        preview = preview_specification(
+            source_path=source, connection_type=expected.get("connection", "none"), model_client=client
+        )
     lines, passed, total = [], 0, 0
     for item in expected["positions"]:
         found = [p for p in preview.positions if item["line"] in p.source_text]

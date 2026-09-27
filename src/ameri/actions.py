@@ -148,8 +148,36 @@ def _markdown_rows(text: str) -> list[list[str] | str]:
 SYSTEM_HEADING = re.compile(r"^система\s+\S+", re.IGNORECASE)
 
 
+def _xlsx_items(path: Path) -> list[list[str] | str] | None:
+    """Строки Excel без колонки «№»: такие прототип нарезает на позиции моделью, и она склеивает
+    заголовок, шапку и первую позицию. С колонкой «№» — None: прототип делит позиции по номерам сам."""
+
+    import openpyxl
+
+    try:
+        book = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    except Exception:  # noqa: BLE001 - пусть файл читает прототип
+        return None
+    items: list[list[str] | str] = []
+    try:
+        for sheet in book.worksheets:
+            for row in sheet.iter_rows(values_only=True):
+                cells = ["" if value is None else str(value).strip() for value in row]
+                cells = [cell for cell in cells if cell]
+                if any(cell.lower() in INDEX_HEADERS for cell in cells):
+                    return None
+                if len(cells) == 1:
+                    items.append(cells[0])
+                elif cells:
+                    items.append(cells)
+            items.append("")  # граница листа
+    finally:
+        book.close()
+    return items
+
+
 def spec_lines_text(path: Path) -> str | None:
-    """Спецификация из .md, .odt или .csv — нумерованными строками для прототипа; None — формат не наш.
+    """Спецификация из .md, .odt, .csv или .xlsx без «№» — нумерованными строками для прототипа; None — не наш формат.
 
     С номерами («1. …») прототип делит текст на позиции сам, без модели; строки без номера
     (заголовок документа, «Система В1») в позиции не попадают. Колонку «СИСТЕМА» прототип
@@ -168,6 +196,10 @@ def spec_lines_text(path: Path) -> str | None:
         items = [line.split(" | ") if " | " in line else line for line in odt_text(path).splitlines()]
     elif suffix == ".md":
         items = _markdown_rows(path.read_text(encoding="utf-8", errors="replace"))
+    elif suffix == ".xlsx":
+        items = _xlsx_items(path)
+        if items is None:
+            return None
     else:
         return None
 
@@ -574,7 +606,7 @@ def duct_calc(
         connection = CONNECTION_TYPES[connection_label]
 
         def run_lines() -> tuple[object, str]:
-            # Таблицы .md/.odt/.csv прототип разбирает хуже, чем строки заказа Word: передаём ему
+            # Таблицы .md/.odt/.csv/.xlsx без «№» прототип разбирает хуже, чем строки заказа Word: передаём ему
             # спецификацию построчно «Наименование — количество ед.», без шапки и номеров строк.
             source = Path(tmp) / f"{spec.path.stem}.md"
             source.write_text(spec_lines_text(spec.path) or "", encoding="utf-8")
@@ -606,7 +638,7 @@ def duct_calc(
                     if isinstance(error, PipelineNeedsInput):
                         raise
                     result, summary = run_lines()
-            elif suffix in {".md", ".odt"}:
+            elif suffix in {".md", ".odt"} or (suffix == ".xlsx" and spec_lines_text(spec.path) is not None):
                 result, summary = run_lines()
             else:
                 result = run_specification_pipeline(

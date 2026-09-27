@@ -326,3 +326,26 @@ def test_preview_without_headings_rechecks_completeness():
     assert fixed.completeness.source_position_count == 2
     assert fixed.warnings == ("другое", "расхождение")
     assert actions.preview_without_headings(replace(preview, positions=(item(duct),)), compare).positions == (item(duct),)
+
+
+def test_xlsx_without_index_column_becomes_numbered_lines(tmp_path):
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append(["Вытяжка В2, Северный цех. "])
+    sheet.append(["Наименование", "Кол-во", "Ед."])
+    sheet.append(["Воздуховод из полипропилена ⌀200", 8, "мп"])
+    sheet.append(["Зонт круглый 315", 1, "шт"])
+    plain = tmp_path / "plain.xlsx"
+    book.save(plain)
+    assert actions.spec_lines_text(plain).splitlines() == [
+        "Вытяжка В2, Северный цех.",
+        "1. Воздуховод из полипропилена ⌀200 — 8 мп; кол-во: 8",
+        "2. Зонт круглый 315 — 1 шт; кол-во: 1",
+    ]
+    sheet.insert_cols(1)
+    sheet["A2"] = "№"
+    numbered = tmp_path / "numbered.xlsx"
+    book.save(numbered)
+    assert actions.spec_lines_text(numbered) is None  # с «№» позиции делит сам прототип
