@@ -102,6 +102,15 @@ def test_attachment_preview_text(tmp_path):
     assert not preview.truncated
 
 
+def test_attachment_preview_markdown(tmp_path):
+    path = tmp_path / "spec.md"
+    path.write_text("# Заголовок\n\n| A | B |\n|---|---|\n| 1 | 2 |", encoding="utf-8")
+    preview = actions.attachment_preview(_attachment(path))
+    assert preview.kind == "markdown"
+    assert preview.text == "# Заголовок\n\n| A | B |\n|---|---|\n| 1 | 2 |"
+    assert not preview.truncated
+
+
 def test_attachment_preview_image_and_pdf_by_suffix(tmp_path):
     image = tmp_path / "photo.png"
     image.write_bytes(b"\x89PNG\r\n")
