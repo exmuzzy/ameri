@@ -147,7 +147,10 @@ def test_repository_materials_are_valid():
         assert section_ids and len(section_ids) == len(set(section_ids)), material.path
         for section in material.sections:
             assert f"{{#{section.id}}}" in text, f"{material.path}: у раздела «{section.title}» нет явного {{#id}}"
-            assert re.search(r"https?://", section.text), f"{material.path}: у раздела «{section.title}» нет источника"
+            # Правила самой компании (материал «Как считает расчётка компании») публичной ссылки не имеют.
+            assert re.search(r"https?://|Источник: правила расчётки компании", section.text), (
+                f"{material.path}: у раздела «{section.title}» нет источника"
+            )
     for path in [*HARNESS.glob("rules/*.md"), *HARNESS.glob("examples/*.md"), *HARNESS.glob("prompts/*.md")]:
         for label, url in re.findall(r"\[([^\]]+)\]\((/materials\?[^)\s]+)\)", path.read_text(encoding="utf-8")):
             shown, links = materials.split_links(f"[{label}]({url})", loaded)

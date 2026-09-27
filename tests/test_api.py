@@ -254,14 +254,19 @@ def test_update_request_like_the_button(env, monkeypatch):
     monkeypatch.setattr(HarnessRepo, "pull", lambda self: "Харнес обновлён")
     assert client.post("/api/v1/update", headers=login(client, "anna")).status_code == 403
     (settings.data_dir / "update-status.json").write_text('{"state": "done", "commit": "abc"}', encoding="utf-8")
-    for name in ("root", "boss"):
-        response = client.post("/api/v1/update", headers=login(client, name))
-        assert response.status_code == 202
-        assert response.json()["harness"] == "Харнес обновлён"
+    response = client.post("/api/v1/update", headers=login(client, "boss"))
+    assert response.status_code == 202
+    assert response.json()["harness"] == "Харнес обновлён"
+    assert response.json()["in_progress"] is True
+    # Пока заявка ждёт службу, второй запрос отклоняется — как неактивная кнопка на сайте.
+    assert client.post("/api/v1/update", headers=login(client, "root")).status_code == 409
     assert (settings.data_dir / "update-request").read_text(encoding="utf-8") == "Руководитель"
+    (settings.data_dir / "update-request").unlink()
+    assert client.post("/api/v1/update", headers=login(client, "root")).status_code == 202
+    (settings.data_dir / "update-request").unlink()
     state = client.get("/api/v1/update", headers=login(client, "root")).json()
-    assert state == {"status": {"state": "done", "commit": "abc"}, "request_stale": False}
-    assert "request_update(" in inspect.getsource(__import__("views.updates", fromlist=["x"]).render_update_panel)
+    assert state == {"status": {"state": "done", "commit": "abc"}, "request_stale": False, "in_progress": False}
+    assert "request_update(" in inspect.getsource(__import__("views.updates", fromlist=["x"])._start_update)
     assert updates.STALE_REQUEST_SECONDS == 120
 
 
