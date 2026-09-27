@@ -2,6 +2,12 @@
 # Спецификация — каталог с spec.* и expected.yaml: реальные эталоны harness/evals/ или вымышленные demo/training/.
 # Чаты называются «[До обучения] <title>» и «[После обучения] <title>»; ведёт их demo.manager.
 
+# Свои пользователи замеров: demo.manager и demo.leader заняты демо-чатами (tools/demo_via_api.py --setup-users
+# задаёт им пароли), поэтому две сессии не мешают друг другу. Пароли — только в окружении.
+users:
+  manager: {login: demo.manager2, name: Мария Обучение, role: manager, password_env: AMERI_TRAINING_MANAGER_PASSWORD}
+  leader: {login: demo.leader2, name: Павел Обучение, role: leader, password_env: AMERI_TRAINING_LEADER_PASSWORD}
+
 specs:
   - key: himlab
     dir: harness/evals/himlab

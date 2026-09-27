@@ -1,9 +1,10 @@
 """Замеры «до/после обучения» Харнеса на рабочем сайте через HTTP API (prompts/industry-research.md).
 
-Сценарии — demo/training/scenarios.yaml: спецификации (каталог с spec.* и, если есть, expected.yaml),
-справочные вопросы и витринные чаты. Учётные данные — из окружения: AMERI_DEMO_MANAGER_PASSWORD,
-AMERI_DEMO_LEADER_PASSWORD (пользователи — как в demo/scenarios.yaml).
+Сценарии — demo/training/scenarios.yaml: пользователи, спецификации (каталог с spec.* и, если есть, expected.yaml),
+справочные вопросы и витринные чаты. Пароли — из окружения: AMERI_TRAINING_MANAGER_PASSWORD,
+AMERI_TRAINING_LEADER_PASSWORD; завести пользователей — `setup-users` (нужны AMERI_ADMIN_LOGIN, AMERI_ADMIN_PASSWORD).
 
+    python tools/training_via_api.py setup-users              # завести пользователей замеров или сменить им пароли
     python tools/training_via_api.py run --phase before       # чаты «[До обучения] …»: расчётки и вопросы
     python tools/training_via_api.py run --phase after        # то же в чатах «[После обучения] …»
     python tools/training_via_api.py measure --phase before   # XLSX → красные строки → demo/training/results/
@@ -36,7 +37,6 @@ TRAINING = ROOT / "demo" / "training"
 RESULTS = TRAINING / "results"
 PREFIX = {"before": "[До обучения]", "after": "[После обучения]", "showcase": "[Витрина]"}
 ACTIONS = {"ask": "Вопрос ассистенту", "duct_calc": "Расчётка воздуховодов", "note": None}
-USERS = yaml.safe_load((ROOT / "demo" / "scenarios.yaml").read_text(encoding="utf-8"))["users"]
 
 
 def load_config() -> dict:
@@ -53,9 +53,18 @@ def expected(item: dict) -> dict | None:
     return yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 
-def login_all(api: Api) -> dict[str, str]:
+def setup_users(api: Api, config: dict) -> None:
+    admin = env("AMERI_ADMIN_LOGIN")
+    api.login(admin, env("AMERI_ADMIN_PASSWORD"))
+    for user in config["users"].values():
+        body = {"login": user["login"], "name": user["name"], "role": user["role"], "password": env(user["password_env"])}
+        api.request(admin, "POST", "/users", json=body)
+        log(f"{user['login']}: сохранён ({user['role']})")
+
+
+def login_all(api: Api, config: dict) -> dict[str, str]:
     logins = {}
-    for role, user in USERS.items():
+    for role, user in config["users"].items():
         api.login(user["login"], env(user["password_env"]))
         logins[role] = user["login"]
     return logins
@@ -244,7 +253,7 @@ def report() -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["run", "measure", "showcase", "note", "like", "report"])
+    parser.add_argument("command", choices=["setup-users", "run", "measure", "showcase", "note", "like", "report"])
     parser.add_argument("--phase", choices=["before", "after"], default="before")
     parser.add_argument("--url", default=DEFAULT_URL)
     parser.add_argument("--chat")
@@ -257,8 +266,11 @@ def main() -> None:
         print(report())
         return
     api = Api(args.url)
-    users = login_all(api)
     config = load_config()
+    if args.command == "setup-users":
+        setup_users(api, config)
+        return
+    users = login_all(api, config)
     if args.command == "run":
         run_phase(api, users, config, args.phase)
     elif args.command == "measure":
