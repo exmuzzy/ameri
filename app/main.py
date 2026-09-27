@@ -6,15 +6,17 @@ import sys
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from ameri import session  # noqa: E402
 from ameri.auth import authenticate  # noqa: E402
 from ameri.materials import PAGE_PATH as MATERIALS_PATH  # noqa: E402
 from views import about, admin, api_access, chats, harness_page, howto, materials, onboarding, quality  # noqa: E402
 from views.common import get_access  # noqa: E402
-from views.common import get_users  # noqa: E402
+from views.common import get_settings, get_users  # noqa: E402
 from views.theme import STATIC, apply_theme  # noqa: E402
 
 ROLE_TITLES = {"admin": "Администратор", "leader": "Руководитель", "manager": "Менеджер"}
@@ -32,8 +34,8 @@ def login_page() -> None:
             st.subheader("Рабочее место")
             st.caption("Чаты, спецификации и расчётки — в одном месте.")
             with st.form("login"):
-                login = st.text_input("Логин")
-                password = st.text_input("Пароль", type="password")
+                login = st.text_input("Логин", autocomplete="username")
+                password = st.text_input("Пароль", type="password", autocomplete="current-password")
                 submitted = st.form_submit_button("Войти", type="primary", use_container_width=True)
         st.caption("Для менеджеров по полипропиленовым воздуховодам.")
         with st.expander("Что такое ameri"):
@@ -44,19 +46,39 @@ def login_page() -> None:
             st.error("Неверный логин или пароль.")
         else:
             st.session_state["user"] = user
+            # Cookie ставится на следующем проходе: rerun прервал бы скрипт до выполнения JS.
+            st.session_state["set_cookie"] = session.issue(session.session_secret(get_settings().data_dir), user)
             st.rerun()
 
 
+def _write_cookie(token: str | None) -> None:
+    components.html(session.cookie_script(token), height=0)
+
+
 user = st.session_state.get("user")
+if user is None and not st.session_state.get("logged_out"):
+    # «Запомнить вход»: подписанная cookie из прошлых визитов.
+    user = session.read(
+        session.session_secret(get_settings().data_dir), st.context.cookies.get(session.COOKIE_NAME), get_users()
+    )
+    if user is not None:
+        st.session_state["user"] = user
 if user is None:
+    if st.session_state.pop("clear_cookie", False):
+        _write_cookie(None)
     login_page()
     st.stop()
+if "set_cookie" in st.session_state:
+    _write_cookie(st.session_state.pop("set_cookie"))
 
 with st.sidebar:
     st.caption("УЧЁТНАЯ ЗАПИСЬ")
     st.markdown(f"**{user.name}**  \n{ROLE_TITLES[user.role]}")
     if st.button("Выйти", icon=":material/logout:"):
         st.session_state.clear()
+        # Не входить снова по старой cookie в этой вкладке и стереть её в браузере.
+        st.session_state["logged_out"] = True
+        st.session_state["clear_cookie"] = True
         st.rerun()
 
 access = get_access()
