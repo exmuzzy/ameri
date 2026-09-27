@@ -579,6 +579,12 @@ def _install_harness(harness_dir: Path | None) -> None:
         setattr(pipeline, attr, tuple(base) + extra)
 
 
+NO_POSITIONS_TEXT = (
+    "Расчётка не построена: в файле не нашлось ни одной позиции с размерами и количеством. "
+    "Уточните у клиента сечения, длины и количества изделий или спросите ассистента, что запросить."
+)
+
+
 def duct_calc(
     *,
     spec: Attachment,
@@ -651,6 +657,11 @@ def duct_calc(
                 summary = f"Позиций: {result.completeness.model_position_count}."
         except PipelineNeedsInput as error:
             return ActionResult(text=f"Нужно уточнение, расчётка не построена: {error}")
+        except ValueError as error:
+            if "без позиций" not in str(error):
+                raise
+            # Прототип не строит пустую расчётку: в файле нет ни одной позиции с размером или количеством.
+            return ActionResult(text=NO_POSITIONS_TEXT)
         lines = [f"Расчётка по файлу «{spec.name}» готова ({connection_label.lower()}). {summary}"]
         red = red_positions(output)
         if red:

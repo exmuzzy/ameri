@@ -349,3 +349,46 @@ def test_xlsx_without_index_column_becomes_numbered_lines(tmp_path):
     numbered = tmp_path / "numbered.xlsx"
     book.save(numbered)
     assert actions.spec_lines_text(numbered) is None  # с «№» позиции делит сам прототип
+
+
+def fake_prototype(tmp_path, error: str) -> Path:
+    """Минимальный duct-calc: pipeline падает с ValueError, как прототип на файле без позиций."""
+
+    package = tmp_path / "proto" / "src" / "duct_calc"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "model_client.py").write_text(
+        "class ModelClientConfig:\n    def __init__(self, **kw): pass\n"
+        "class DeepSeekClient:\n    def __init__(self, config): pass\n",
+        encoding="utf-8",
+    )
+    (package / "pipeline.py").write_text(
+        "PASSTHROUGH_ITEM_KEYWORDS = ()\nGRID_KEYWORDS = ()\nVALVE_KEYWORDS = ()\n"
+        "def build_system_prompt(): return ''\n"
+        "def with_umbrella_optional_neck_key(*a, **kw): return a[0] if a else None\n"
+        "def preview_specification(*a, **kw): return None\n"
+        "def compare_completeness(*a, **kw): return None\n"
+        "class PipelineNeedsInput(ValueError): pass\n"
+        f"def run_specification_pipeline(**kw): raise ValueError({error!r})\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "proto" / "data").mkdir()
+    return tmp_path / "proto"
+
+
+def test_duct_calc_explains_spec_without_positions(tmp_path, monkeypatch):
+    import sys
+
+    for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+        monkeypatch.delitem(sys.modules, name)
+    proto = fake_prototype(tmp_path, "Нельзя сформировать расчётку без позиций")
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    spec_path = tmp_path / "spec.docx"
+    spec_path.write_bytes(b"")
+    spec = Attachment(id=1, name="spec.docx", path=spec_path, size=0)
+    result = actions.duct_calc(
+        spec=spec, connection_label="Раструб", duct_calc_dir=proto, base_url="u", api_key="sk-test", model="m"
+    )
+    assert result.text == actions.NO_POSITIONS_TEXT
+    for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+        del sys.modules[name]
