@@ -40,7 +40,7 @@ class ActionResult:
 class AttachmentPreview:
     """Предпросмотр вложения в Чате: без обращения к DeepSeek или прототипу duct-calc."""
 
-    kind: str  # "image" | "pdf" | "text" | "table" | "unsupported"
+    kind: str  # "image" | "pdf" | "markdown" | "text" | "table" | "unsupported"
     text: str = ""
     rows: list[list[str]] = field(default_factory=list)
     truncated: bool = False
@@ -302,9 +302,10 @@ def _xlsx_rows(path: Path) -> list[list[str]]:
 def attachment_preview(attachment: Attachment) -> AttachmentPreview:
     """Предпросмотр вложения в Чате, независимо от прототипа duct-calc.
 
-    Картинки и PDF показываются как есть, текстовые форматы и .odt — текстом,
-    .xlsx — таблицей; для .doc (старый бинарный формат) и прочего показывается
-    только сообщение о недоступности предпросмотра.
+    Картинки и PDF показываются как есть, .md — форматированным Markdown,
+    остальные текстовые форматы и .odt — простым текстом, .xlsx — таблицей;
+    для .doc (старый бинарный формат) и прочего показывается только сообщение
+    о недоступности предпросмотра.
     """
 
     suffix = attachment.path.suffix.lower()
@@ -313,6 +314,9 @@ def attachment_preview(attachment: Attachment) -> AttachmentPreview:
             return AttachmentPreview(kind="image")
         if suffix == ".pdf":
             return AttachmentPreview(kind="pdf")
+        if suffix == ".md":
+            text = attachment.path.read_text(encoding="utf-8", errors="replace")
+            return AttachmentPreview(kind="markdown", text=text[:PREVIEW_MAX_CHARS], truncated=len(text) > PREVIEW_MAX_CHARS)
         if suffix in TEXT_SUFFIXES:
             text = attachment.path.read_text(encoding="utf-8", errors="replace")
             return AttachmentPreview(kind="text", text=text[:PREVIEW_MAX_CHARS], truncated=len(text) > PREVIEW_MAX_CHARS)
