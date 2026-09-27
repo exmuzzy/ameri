@@ -272,6 +272,50 @@ def red_positions(xlsx: Path, limit: int = 20) -> list[str]:
     return found
 
 
+FLANGE_20 = re.compile(r"фланц?\w*\s*-?\s*20\b|\bф\s*20\b|шинорейк\w*\s*20", re.IGNORECASE)
+
+
+def _result_names(xlsx: Path) -> list[str]:
+    """Наименования строк расчётки (колонка C под шапкой шаблона), без красных."""
+
+    import openpyxl
+
+    try:
+        sheet = openpyxl.load_workbook(xlsx, read_only=True).worksheets[0]
+    except Exception:  # noqa: BLE001 - заметки необязательны
+        return []
+    names = []
+    for row in sheet.iter_rows(values_only=True):
+        if len(row) > 2 and isinstance(row[1], int) and isinstance(row[2], str) and "(проблема:" not in row[2]:
+            names.append(" ".join(row[2].replace("\t", " · ").split()))
+    return names
+
+
+def result_notes(xlsx: Path, connection_label: str) -> list[str]:
+    """Что менеджер проверяет сам после расчётки: зонты (Q38) и «фланец 20» (Q40)."""
+
+    names = _result_names(xlsx)
+    notes = []
+    umbrellas = [n for n in names if "зонт" in n.lower()]
+    if umbrellas:
+        notes.append(
+            "Проверьте зонты вручную — купол взят как 2 × патрубок, если не указан:\n"
+            + "\n".join(f"- «{n[:90]}»" for n in umbrellas)
+        )
+    flanges = [n for n in names if FLANGE_20.search(n)]
+    if flanges:
+        where = (
+            "посчитано со стандартным фланцем компании для этого сечения"
+            if connection_label == "Фланец"
+            else f"посчитано с выбранным соединением «{connection_label.lower()}»"
+        )
+        notes.append(
+            f"Уточните у клиента «фланец 20» — шинорейка 20, толщина фланца 20 или полка 20? Пока {where}:\n"
+            + "\n".join(f"- «{n[:90]}»" for n in flanges)
+        )
+    return notes
+
+
 def duct_calc_available(duct_calc_dir: Path | None) -> bool:
     return bool(
         duct_calc_dir
@@ -545,8 +589,66 @@ def preview_without_headings(preview, compare_completeness):
     )
 
 
+SEGMENT_MM = 1500
+
+
+def equal_segments(total_mm) -> list[tuple[int, object]]:
+    """Q37 (б): метраж — равными частями не длиннее 1500 мм: 3000 → 2 × 1500, 2000 → 2 × 1000.
+
+    Возвращает [(количество, длина_мм)]; если поровну до миллиметра не делится, последний кусок
+    длиннее на остаток: 3200 → 2 × 1066 + 1 × 1068.
+    """
+
+    import math
+    from decimal import ROUND_FLOOR, Decimal
+
+    total = Decimal(str(total_mm))
+    count = math.ceil(total / SEGMENT_MM)
+    base = (total / count).quantize(Decimal(1), rounding=ROUND_FLOOR)
+    rest = total - base * count
+    if rest == 0:
+        return [(count, base)]
+    if count == 1:
+        return [(1, total)]
+    return [(count - 1, base), (1, base + rest)]
+
+
+def _segment_label(length) -> str:
+    return f"{length.normalize():f}"
+
+
+def _install_segments(pipeline) -> None:
+    """Q37 (б) вместо нарезки прототипа «по 1500 и остаток»."""
+
+    from dataclasses import replace
+
+    def meter_segment_rows(position, coefficients, *, total_meters, system, connection_type):
+        if total_meters <= 0:
+            raise pipeline.CalculationNeedsInput(
+                f"Позиция {position.source_no}: количество метров должно быть больше нуля", code="invalid_qty"
+            )
+        return [
+            pipeline.position_to_output_row(
+                replace(
+                    position,
+                    qty=count,
+                    length_mm=float(length),
+                    source_text=f"{position.source_text} — {count} шт по {_segment_label(length)} мм",
+                ),
+                coefficients,
+                system=system,
+                connection_type=connection_type,
+            )
+            for count, length in equal_segments(total_meters * 1000)
+        ]
+
+    pipeline._meter_segment_rows = meter_segment_rows
+
+
 def _install_decisions(pipeline) -> None:
-    """Q38 и Q39 поверх прототипа: оборачиваем его функции, исходные сохраняем для повторной установки."""
+    """Q37, Q38 и Q39 поверх прототипа: оборачиваем его функции, исходные сохраняем для повторной установки."""
+
+    _install_segments(pipeline)
 
     neck = getattr(pipeline, "_ameri_original_umbrella_neck", None) or pipeline.with_umbrella_optional_neck_key
     pipeline._ameri_original_umbrella_neck = neck
@@ -668,6 +770,7 @@ def duct_calc(
             lines.append(
                 "Красные позиции — не посчитаны, нужно уточнить:\n" + "\n".join(f"- {item}" for item in red)
             )
+        lines += result_notes(output, connection_label)
         if result.warnings:
             lines.append("Предупреждения: " + "; ".join(result.warnings))
         return ActionResult(text="\n\n".join(lines), files=[(output.name, output.read_bytes())])

@@ -392,3 +392,37 @@ def test_duct_calc_explains_spec_without_positions(tmp_path, monkeypatch):
     assert result.text == actions.NO_POSITIONS_TEXT
     for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
         del sys.modules[name]
+
+
+def test_equal_segments_q37():
+    from decimal import Decimal as D
+
+    assert actions.equal_segments(2000) == [(2, D(1000))]
+    assert actions.equal_segments(3000) == [(2, D(1500))]
+    assert actions.equal_segments(1500) == [(1, D(1500))]
+    assert actions.equal_segments(900) == [(1, D(900))]
+    assert actions.equal_segments(5000) == [(4, D(1250))]
+    assert actions.equal_segments(3200) == [(2, D(1066)), (1, D(1068))]
+    for total in (1234, 3200, 14000, 17000):
+        parts = actions.equal_segments(total)
+        assert sum(n * length for n, length in parts) == total
+        assert all(length <= 1500 for _, length in parts)
+
+
+def test_result_notes_umbrella_and_flange20(tmp_path):
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append([None, 1, "Зонт круглый 315\t1\tшт"])
+    sheet.append([None, 2, "Переход ф450/600х300 — труба/фланец20"])
+    sheet.append([None, 3, "Отвод ф200 (проблема: Позиция 3: тип не распознан)"])
+    sheet.append([None, 4, "Воздуховод ф200 — 2 шт по 1000 мм"])
+    path = tmp_path / "r.xlsx"
+    book.save(path)
+    notes = actions.result_notes(path, "Раструб")
+    assert len(notes) == 2
+    assert "Проверьте зонты вручную" in notes[0] and "Зонт круглый 315 · 1 · шт" in notes[0]
+    assert "шинорейка 20" in notes[1] and "«раструб»" in notes[1] and "фланец20" in notes[1]
+    assert "стандартным фланцем" in actions.result_notes(path, "Фланец")[1]
+    assert not actions.FLANGE_20.search("Воздуховод ф200")
