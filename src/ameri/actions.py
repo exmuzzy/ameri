@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sys
 import tempfile
 import zipfile
@@ -88,14 +89,14 @@ def _is_header(cells: list[str]) -> bool:
     )
 
 
-def table_lines(rows: list[list[str]]) -> list[str]:
-    """Строки таблицы спецификации — в вид «Наименование — количество ед.», как в заказе Word.
+def table_lines(rows: list[list[str]]) -> list[tuple[str, str | None]]:
+    """Строки таблицы спецификации — (текст «Наименование — количество ед.», количество).
 
     Шапка и колонка с номером строки убираются: модель разбора путает их с позициями
-    и с количеством. Строка из одной ячейки (заголовок раздела) остаётся как есть.
+    и с количеством. Строка из одной ячейки — заголовок раздела, количество у неё None.
     """
 
-    lines: list[str] = []
+    lines: list[tuple[str, str | None]] = []
     index_column = False
     for raw in rows:
         cells = [" ".join(str(cell).split()) for cell in raw]
@@ -107,7 +108,11 @@ def table_lines(rows: list[list[str]]) -> list[str]:
             continue
         if index_column and len(cells) > 1 and cells[0].rstrip(".").isdigit():
             cells = cells[1:]
-        lines.append(cells[0] if len(cells) == 1 else f"{cells[0]} — {' '.join(cells[1:])}")
+        if len(cells) == 1:
+            lines.append((cells[0], None))
+            continue
+        quantity = next((c.replace(",", ".") for c in cells[1:] if re.fullmatch(r"\d+(?:[.,]\d+)?", c)), None)
+        lines.append((f"{cells[0]} — {' '.join(cells[1:])}", quantity))
     return lines
 
 
@@ -127,8 +132,16 @@ def _markdown_rows(text: str) -> list[list[str] | str]:
     return items
 
 
+SYSTEM_HEADING = re.compile(r"^система\s+\S+", re.IGNORECASE)
+
+
 def spec_lines_text(path: Path) -> str | None:
-    """Текст спецификации построчно для прототипа из .md, .odt или .csv; None — формат не наш."""
+    """Спецификация из .md, .odt или .csv — нумерованными строками для прототипа; None — формат не наш.
+
+    С номерами («1. …») прототип делит текст на позиции сам, без модели; строки без номера
+    (заголовок документа, «Система В1») в позиции не попадают. Колонку «СИСТЕМА» прототип
+    берёт из строки позиции, поэтому система из заголовка раздела дописывается в каждую строку.
+    """
 
     import csv
     import io
@@ -137,24 +150,44 @@ def spec_lines_text(path: Path) -> str | None:
     if suffix == ".csv":
         text = path.read_text(encoding="utf-8-sig", errors="replace")
         dialect = csv.Sniffer().sniff(text[:4096], delimiters=";,\t") if text.strip() else csv.excel
-        return "\n".join(table_lines(list(csv.reader(io.StringIO(text), dialect))))
-    if suffix == ".odt":
-        items: list[list[str] | str] = [line.split(" | ") if " | " in line else line for line in odt_text(path).splitlines()]
+        items: list[list[str] | str] = list(csv.reader(io.StringIO(text), dialect))
+    elif suffix == ".odt":
+        items = [line.split(" | ") if " | " in line else line for line in odt_text(path).splitlines()]
     elif suffix == ".md":
         items = _markdown_rows(path.read_text(encoding="utf-8", errors="replace"))
     else:
         return None
-    lines: list[str] = []
+
+    rows: list[tuple[str, str | None]] = []
     table: list[list[str]] = []
     for item in [*items, ""]:
         if isinstance(item, list):
             table.append(item)
             continue
-        lines += table_lines(table)
+        rows += table_lines(table)
         table = []
         if item:
-            lines.append(item)
-    return "\n".join(lines)
+            rows.append((item, None))
+
+    heading: list[str] = []
+    lines: list[str] = []
+    system = ""
+    for text, quantity in rows:
+        if quantity is None and " — " not in text:
+            # Заголовок — строка вне таблицы или из одной ячейки. Первые — шапка документа
+            # до позиций, «Система …» — раздел; остальные в позиции не попадают.
+            if SYSTEM_HEADING.match(text):
+                system = "система " + text.split(None, 1)[1].rstrip(".:;, ")
+            elif not lines:
+                heading.append(text)
+            continue
+        line = f"{len(lines) + 1}. {text}"
+        if system:
+            line += f"; {system}"  # прототип берёт метку системы до ближайшей «;»
+        if quantity is not None:
+            line += f"; кол-во: {quantity}"
+        lines.append(line)
+    return "\n".join(heading + lines)
 
 
 PROBLEM_FIELDS = {

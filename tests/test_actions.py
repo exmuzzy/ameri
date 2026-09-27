@@ -109,20 +109,25 @@ def test_spec_lines_from_tables(tmp_path):
     )
     assert actions.spec_lines_text(md).splitlines() == [
         "Приток П2",
-        "Воздуховод ПП 400×300 δ=4 — 8 м",
-        "Отвод 90° ПП ф160 — 2 шт",
+        "1. Воздуховод ПП 400×300 δ=4 — 8 м; кол-во: 8",
+        "2. Отвод 90° ПП ф160 — 2 шт; кол-во: 2",
     ]
     csv_file = tmp_path / "s.csv"
     csv_file.write_text("№;Наименование;Кол-во;Ед. изм.\n1;Воздуховод ПП ф160 (В1);10;мп\n2;Хомут ф160;4;шт\n", encoding="utf-8")
-    assert actions.spec_lines_text(csv_file).splitlines() == ["Воздуховод ПП ф160 (В1) — 10 мп", "Хомут ф160 — 4 шт"]
+    assert actions.spec_lines_text(csv_file).splitlines() == [
+        "1. Воздуховод ПП ф160 (В1) — 10 мп; кол-во: 10",
+        "2. Хомут ф160 — 4 шт; кол-во: 4",
+    ]
     assert actions.spec_lines_text(tmp_path / "x.xlsx") is None
 
 
 def test_spec_lines_from_odt_keeps_system_headings():
     demo = Path(__file__).resolve().parents[1] / "demo" / "specs" / "06-ceh-pokraski-v1-p1.odt"
     lines = actions.spec_lines_text(demo).splitlines()
-    assert "Система П1" in lines
-    assert "Воздуховод ПП ∅400 δ=4 — 14 мп" in lines
+    assert lines[0] == "Цех покраски, объект «Восточная площадка»"
+    assert "1. Воздуховод ПП ∅400 δ=4 — 14 мп; система В1; кол-во: 14" in lines
+    assert "9. Решётка ПП 500×400 — 2 шт; система П1; кол-во: 2" in lines
+    assert not any(line.startswith("Система") for line in lines)
     assert not any("Наименование" in line for line in lines)
 
 
