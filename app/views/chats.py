@@ -8,9 +8,10 @@ import streamlit as st
 
 from ameri import actions, chat_service
 from ameri.chat_service import ACTION_DUCT, ACTION_NOTE
+from ameri.materials import split_links
 from ameri.store import Chat, Feedback, Message
 
-from views.common import current_user, display_name, get_access, get_settings, get_store, get_users
+from views.common import current_user, display_name, get_access, get_materials, get_settings, get_store, get_users
 
 
 def _visible_chats(query: str, author: str | None) -> list[Chat]:
@@ -128,7 +129,18 @@ def _render_message(chat: Chat, message: Message, feedback: list[Feedback], can_
         if message.action:
             meta += f" · {message.action}"
         st.caption(meta)
-        st.markdown(message.content)
+        text, links = split_links(message.content, get_materials())
+        st.markdown(text)
+        if links:
+            st.caption("МАТЕРИАЛЫ ОТРАСЛИ")
+            for link in links:
+                params = {"doc": link.doc_id} | ({"section": link.section_id} if link.section_id else {})
+                st.page_link(
+                    st.session_state["pages"]["materials"],
+                    label=link.label,
+                    icon=":material/menu_book:",
+                    query_params=params,
+                )
         for attachment in message.attachments:
             if attachment.path.is_file():
                 st.download_button(

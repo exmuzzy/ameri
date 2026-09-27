@@ -11,7 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ameri.auth import authenticate  # noqa: E402
-from views import about, admin, api_access, chats, harness_page, howto, onboarding, quality  # noqa: E402
+from ameri.materials import PAGE_PATH as MATERIALS_PATH  # noqa: E402
+from views import about, admin, api_access, chats, harness_page, howto, materials, onboarding, quality  # noqa: E402
 from views.common import get_access  # noqa: E402
 from views.common import get_users  # noqa: E402
 from views.theme import STATIC, apply_theme  # noqa: E402
@@ -60,12 +61,17 @@ with st.sidebar:
 
 access = get_access()
 chats_page = st.Page(chats.render, title="Чаты", icon=":material/forum:", url_path="chats", default=True)
+materials_page = st.Page(
+    materials.render, title="Материалы отрасли", icon=":material/library_books:", url_path=MATERIALS_PATH
+)
 work = [
     chats_page,
     st.Page(onboarding.render, title="Новому сотруднику", icon=":material/school:", url_path="onboarding"),
     st.Page(about.render, title="О проекте", icon=":material/info:", url_path="about"),
     st.Page(howto.render, title="Как работать", icon=":material/menu_book:", url_path="howto"),
     st.Page(howto.render_examples, title="Примеры работы", icon=":material/description:", url_path="examples"),
+    st.Page(howto.render_assistant, title="Как учится ассистент", icon=":material/auto_stories:", url_path="assistant"),
+    materials_page,
     st.Page(api_access.render, title="Доступ к API", icon=":material/key:", url_path="api"),
 ]
 lead = []
@@ -75,6 +81,6 @@ if access.can(user, "harness.edit"):
     lead.append(st.Page(harness_page.render, title="Харнес", icon=":material/rule:", url_path="harness"))
 if user.role == "admin":
     lead.append(st.Page(admin.render, title="Настройки", icon=":material/settings:", url_path="settings"))
-st.session_state["pages"] = {"chats": chats_page}
+st.session_state["pages"] = {"chats": chats_page, "materials": materials_page}
 page = st.navigation({"Работа": work, "Руководителю": lead} if lead else work)
 page.run()

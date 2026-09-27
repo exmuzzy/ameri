@@ -16,10 +16,11 @@ def test_commit_rule_to_git(tmp_path):
     repo = HarnessRepo(harness)
     sha, _ = repo.commit("Начальный Харнес", author=BOSS)
     assert sha
+    before = [r.path for r in list_rules(harness)]
     path = repo.add_rule("Отвод", "Отвод без градусов — 90°.", author="boss", source="опрос")
     sha2, message = repo.commit("Правило: отвод", author=BOSS)
     assert sha2 and sha2 != sha and "создан" in message
-    assert [r.path for r in list_rules(harness)] == [path]
+    assert [r.path for r in list_rules(harness)] == sorted([*before, path])
     assert repo.history()[0].endswith("Правило: отвод")
     log = subprocess.run(["git", "-C", str(tmp_path), "log", "-1", "--format=%an"], capture_output=True, text=True)
     assert log.stdout.strip() == "Руководитель"

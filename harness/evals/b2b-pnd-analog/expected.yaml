@@ -1,0 +1,17 @@
+title: Воздуховоды ПНД «аналог ХИМВЕНТ» с площадями по деталировкам (xlsx; перечень позиций открытой закупки, выгружен дословно)
+source: https://www.b2b-center.ru/app/market-next/vozdukhovody-na-iuzhnyi-kust-pnd/tender-4335899/positions/ (обращение 2026-09-26; взяты только строки позиций, без организатора и адреса)
+connection: socket
+# У прямых участков №1–3 единица «Штука», но число — метры: площадь в столбце совпадает с π·D·L.
+# «red» для них не задан — это вопрос к руководителю (переводить ли такие штуки в метры).
+positions:
+  - {line: "толщ.3мм, Ø200", type: straight_round}
+  - {line: "толщ.3мм, Ø250", type: straight_round}
+  - {line: "толщ.3мм, Ø355", type: straight_round}
+  - {line: "Отвод 90 аналог ХИМВЕНТ90-ПНД, толщ.3мм, Ø200", red: false, type: elbow_round}
+  - {line: "Отвод 45 аналог ХИМВЕНТ90-ПНД, толщ.3мм, Ø250", red: false, type: elbow_round}
+  - {line: "L=100 мм, толщ.3мм, Ø110/ Ø200", red: false, type: transition_round_round}
+  - {line: "Ø250/ 600х350", red: false, type: transition_rect_round}
+  - {line: "Заглушка аналог", red: false, type: cap_round}
+  - {line: "200х200х200", red: false, type: tee_round_round}
+  - {line: "толщ.2,3мм, Ø110", red: false, type: straight_round}
+  - {line: "Ø110/400х200", red: true}

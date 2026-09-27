@@ -1,0 +1,35 @@
+title: Замена участков вентиляции рудника (xlsx; перечень позиций открытой закупки, выгружен дословно)
+source: https://www.b2b-center.ru/app/market-next/chastichnaia-zamena-uchastkov-ventiliatsionnykh-truboprovodov-zaiavka/tender-4331356/positions/ (обращение 2026-09-26; взяты только строки позиций, без организатора и адреса)
+connection: socket
+positions:
+  - {line: "полипропилен 125х3х1500", red: false, type: straight_round}
+  - {line: "полипропилен 315х3х1500", red: false, type: straight_round}
+  - {line: "полипропилен 250х3х1500", red: false, type: straight_round}
+  - {line: "полипропилен 200х3х1500", red: false, type: straight_round}
+  - {line: "полипропилен 160х3х1500", red: false, type: straight_round}
+  - {line: "90градусов полипропилен 315х3", red: false, type: elbow_round}
+  - {line: "90градусов полипропилен 250х3", red: false, type: elbow_round}
+  - {line: "90градусов полипропилен 200х3", red: false, type: elbow_round}
+  - {line: "90градусов полипропилен 160х3", red: false, type: elbow_round}
+  - {line: "90градусов полипропилен 125х3", red: false, type: elbow_round}
+  - {line: "полипропиленовый315х315х3", red: false, type: tee_round_round}
+  - {line: "полипропиленовый250х250х3", red: false, type: tee_round_round}
+  - {line: "полипропиленовый200х200х3", red: false, type: tee_round_round}
+  - {line: "полипропиленовый250х200х3", red: false, type: tee_round_round}
+  - {line: "полипропиленовый160х100х3", red: false, type: tee_round_round}
+  - {line: "крестовина", red: true}
+  - {line: "полипропиленовый 315х250х3", red: false, type: transition_round_round}
+  - {line: "полипропиленовый 315х200х3", red: false, type: transition_round_round}
+  - {line: "полипропиленовый 250х125х3", red: false, type: transition_round_round}
+  - {line: "полипропиленовый 200х160х3", red: false, type: transition_round_round}
+  - {line: "воздуховодовполипропиленовая 315"}
+  - {line: "Уголок 45х45х4", red: false}
+  - {line: "лист стальной", red: false}
+  - {line: "Саморез", red: false}
+  - {line: "Уплотнитель", red: false}
+  - {line: "Скотч", red: false}
+  - {line: "Гибкая вставка 225*225", red: false}
+  - {line: "Гибкая вставка Н-4,0", red: false}
+  - {line: "Гибкая вставка В-4,0", red: false}
+  - {line: "Нагреватель", red: false}
+  - {line: "Вентилятор ВЦП", red: false}

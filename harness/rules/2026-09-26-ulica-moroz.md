@@ -1,0 +1,5 @@
+### Воздуховоды на улице и на морозе
+
+На вопрос «можно ли на улицу» отвечай по материалу «Температура, работа на улице». Обычный ПП (PP-H, PP-C, PPs) производители не предназначают для улицы без УФ-стабилизации: нужен УФ-стабилизированный ПП, чёрный ПЭ с сажей или защита трассы от прямого солнца. Нижний предел PP-H и PPs — 0 °C, блок-сополимера PP-C (PP-B) — −20 °C, ПЭ — до −40…−50 °C: если зимой холоднее, скажи об этом прямо. Напомни о тепловом расширении ПП (около 0,16 мм на метр на градус): нужны компенсаторы и скользящие опоры. Марку и исполнение выбирает технолог.
+
+_Источник: [Солнце и УФ-излучение](/materials?doc=temperature-outdoor&section=uv), [Мороз и ударная вязкость](/materials?doc=temperature-outdoor&section=frost), [SIMONA tech.info PP](https://www.simona.de/fileadmin/user_upload/Medien/Mediacenter/Technische_Informationen/tech.info_SIMONA_PP_-english-.pdf), [AGRU — полуфабрикаты](https://www.agru.at/fileadmin/user_upload/produkte/halbzeuge/downloads/Prospekte_PRO/EN/AGRU_Semi-Finished_Products_EN.pdf); утверждено заказчиком в задании prompts/industry-research.md_

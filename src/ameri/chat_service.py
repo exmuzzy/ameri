@@ -8,6 +8,7 @@ from . import actions
 from .auth import User
 from .harness import Access, HarnessRepo, assistant_prompt
 from .llm import DeepSeekChat, LlmError
+from .materials import load_materials
 from .settings import Settings
 from .store import Chat, Message, Store
 
@@ -95,6 +96,7 @@ def run_action(
                 store.messages(chat.id),
                 settings.duct_calc_dir,
                 names,
+                materials=load_materials(settings.harness_dir),
             )
     except LlmError as error:
         result = actions.ActionResult(f"Не получилось обратиться к модели: {error}")
