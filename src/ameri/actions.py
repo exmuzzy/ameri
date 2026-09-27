@@ -417,10 +417,122 @@ _KEYWORD_LISTS = {
 }
 
 
+# --- Решения руководителя, которых ещё нет в коде прототипа (docs/decisions.md) ---
+# Подключаются обёрткой, как правила Харнеса: прототип на сервере не меняется. Если такое же
+# исправление появится в самом прототипе, обёртки ничего не изменят: купол уже задан, заголовков нет.
+
+# Признаки размера в тексте: число из 3+ цифр, «45х45», «⌀90», «ф90», «d90», «δ=3».
+_SIZE_IN_TEXT = re.compile(r"\d{3,}|\d+\s*[хxX×*]\s*\d+|[⌀∅Øøфd]\s*\d+|[δб]\s*=\s*\d", re.IGNORECASE)
+# Количество в тексте строки: «2 шт», «10 мп», «кол-во: 4».
+_QTY_IN_TEXT = re.compile(r"\d\s*(?:шт|м\.?п|мп|м\b|м2|м²)|кол-?во\s*[:=]?\s*\d", re.IGNORECASE)
+
+
+def _number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def umbrella_with_dome(position):
+    """Q38: одно число у круглого зонта — патрубок; купол = 2 × патрубок, если не указан."""
+
+    from dataclasses import replace
+
+    if position.element_type != "umbrella_round":
+        return position
+    size = dict(position.size)
+    if not _number(size.get("d_neck")) and _number(size.get("d")):
+        size["d_neck"] = float(size["d"])
+    if not _number(size.get("d_neck")) or _number(size.get("d_dome")):
+        return replace(position, size=size)
+    size["d_dome"] = 2 * float(size["d_neck"])
+    questions = tuple(
+        q
+        for q in position.questions
+        if not (
+            any(key in q.code.lower() for key in ("neck", "dome"))
+            or any(word in q.text.lower() for word in ("патруб", "купол", "d_dome", "d_neck"))
+        )
+    )
+    return replace(position, size=size, questions=questions)
+
+
+def is_section_heading(text: str, position) -> bool:
+    """Q39: строка без количества, типа и размеров («Вытяжка из химлаборатории», шапка таблицы).
+
+    Строка с размерами, но без количества заголовком не считается: это пропуск в заявке,
+    она остаётся красной «отсутствует количество».
+    """
+
+    if position.qty is not None or position.element_type is not None or position.length_mm is not None:
+        return False
+    if any(_number(value) for value in position.size.values()):
+        return False
+    return not _SIZE_IN_TEXT.search(text) and not _QTY_IN_TEXT.search(text)
+
+
+def preview_without_headings(preview, compare_completeness):
+    """Убрать заголовки из разбора прототипа и заново сверить полноту (сколько позиций и количеств)."""
+
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    # Строки, которые модель не вернула («строка не разобрана»), остаются красными: это может быть позиция.
+    headings = [
+        item
+        for item in preview.positions
+        if item.position is not None and is_section_heading(item.source_text, item.position)
+    ]
+    if not headings:
+        return preview
+    heading_nos = {str(item.source_no) for item in headings}
+    positions = tuple(item for item in preview.positions if str(item.source_no) not in heading_nos)
+    response = replace(
+        preview.response,
+        positions=tuple(p for p in preview.response.positions if str(p.source_no) not in heading_nos),
+    )
+    old = preview.completeness
+    # Заголовок, который модель вернула как позицию, входил и в число позиций источника.
+    returned = sum(1 for p in preview.response.positions if str(p.source_no) in heading_nos)
+    source = SimpleNamespace(
+        position_count=max(old.source_position_count - returned, 0),
+        quantity_sum=old.source_quantity_sum,
+    )
+    completeness = compare_completeness(source, response)
+    warnings = tuple(w for w in preview.warnings if w != old.message)
+    if completeness.message:
+        warnings += (completeness.message,)
+    return replace(
+        preview,
+        positions=positions,
+        response=response,
+        completeness=completeness,
+        source_position_count=completeness.source_position_count,
+        model_position_count=completeness.model_position_count,
+        model_quantity_sum=completeness.model_quantity_sum,
+        completeness_message=completeness.message,
+        warnings=warnings,
+    )
+
+
+def _install_decisions(pipeline) -> None:
+    """Q38 и Q39 поверх прототипа: оборачиваем его функции, исходные сохраняем для повторной установки."""
+
+    neck = getattr(pipeline, "_ameri_original_umbrella_neck", None) or pipeline.with_umbrella_optional_neck_key
+    pipeline._ameri_original_umbrella_neck = neck
+    pipeline.with_umbrella_optional_neck_key = lambda position: umbrella_with_dome(neck(position))
+
+    preview = getattr(pipeline, "_ameri_original_preview", None) or pipeline.preview_specification
+    pipeline._ameri_original_preview = preview
+    pipeline.preview_specification = lambda **kwargs: preview_without_headings(
+        preview(**kwargs), pipeline.compare_completeness
+    )
+
+
 def _install_harness(harness_dir: Path | None) -> None:
-    """Подключить Харнес к прототипу duct-calc: правила разбора и ключевые слова расчёта."""
+    """Подключить Харнес к прототипу duct-calc: правила разбора, ключевые слова, решения Q38 и Q39."""
 
     from duct_calc import pipeline
+
+    _install_decisions(pipeline)
 
     original = getattr(pipeline, "_ameri_original_prompt", None) or pipeline.build_system_prompt
     pipeline._ameri_original_prompt = original
