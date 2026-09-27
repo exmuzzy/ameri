@@ -19,11 +19,14 @@ from .store import Attachment, Message, Usage
 TEXT_SUFFIXES = {".md", ".txt", ".csv"}
 PARSED_SUFFIXES = {".xlsx", ".docx", ".doc"}
 DUCT_SUFFIXES = {".md", ".xlsx", ".docx", ".doc", ".csv", ".odt"}
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
 CONNECTION_TYPES = {"Фланец": "flange", "Раструб": "socket", "Без соединения": "none"}
 DUCT_TEMPLATE_NAME = "шаблон расчетки стоимости воздуховодов.xlsx"
 MAX_FILE_CHARS = 60_000
 # Бюджет истории Чата в символах (~40–50 тыс. токенов): старые сообщения отбрасываются первыми.
 MAX_HISTORY_CHARS = 150_000
+PREVIEW_MAX_CHARS = 20_000
+PREVIEW_MAX_ROWS = 200
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,16 @@ class ActionResult:
     text: str
     files: list[tuple[str, bytes]] = field(default_factory=list)
     usage: Usage | None = None
+
+
+@dataclass(frozen=True)
+class AttachmentPreview:
+    """Предпросмотр вложения в Чате: без обращения к DeepSeek или прототипу duct-calc."""
+
+    kind: str  # "image" | "pdf" | "text" | "table" | "unsupported"
+    text: str = ""
+    rows: list[list[str]] = field(default_factory=list)
+    truncated: bool = False
 
 
 def _odt_node_text(node: ET.Element) -> str:
@@ -264,6 +277,57 @@ def attachment_text(attachment: Attachment, duct_calc_dir: Path | None) -> str:
     if not text:
         return f"[Файл {attachment.name}: содержимое недоступно ассистенту]"
     return f"[Файл {attachment.name}]\n{text[:MAX_FILE_CHARS]}"
+
+
+def _docx_text(path: Path) -> str:
+    from docx import Document
+
+    return "\n".join(p.text for p in Document(path).paragraphs)
+
+
+def _xlsx_rows(path: Path) -> list[list[str]]:
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheet = workbook.active
+        return [
+            ["" if cell is None else str(cell) for cell in row]
+            for row in sheet.iter_rows(max_row=PREVIEW_MAX_ROWS + 1, values_only=True)
+        ]
+    finally:
+        workbook.close()
+
+
+def attachment_preview(attachment: Attachment) -> AttachmentPreview:
+    """Предпросмотр вложения в Чате, независимо от прототипа duct-calc.
+
+    Картинки и PDF показываются как есть, текстовые форматы и .odt — текстом,
+    .xlsx — таблицей; для .doc (старый бинарный формат) и прочего показывается
+    только сообщение о недоступности предпросмотра.
+    """
+
+    suffix = attachment.path.suffix.lower()
+    try:
+        if suffix in IMAGE_SUFFIXES:
+            return AttachmentPreview(kind="image")
+        if suffix == ".pdf":
+            return AttachmentPreview(kind="pdf")
+        if suffix in TEXT_SUFFIXES:
+            text = attachment.path.read_text(encoding="utf-8", errors="replace")
+            return AttachmentPreview(kind="text", text=text[:PREVIEW_MAX_CHARS], truncated=len(text) > PREVIEW_MAX_CHARS)
+        if suffix == ".odt":
+            text = odt_text(attachment.path)
+            return AttachmentPreview(kind="text", text=text[:PREVIEW_MAX_CHARS], truncated=len(text) > PREVIEW_MAX_CHARS)
+        if suffix == ".docx":
+            text = _docx_text(attachment.path)
+            return AttachmentPreview(kind="text", text=text[:PREVIEW_MAX_CHARS], truncated=len(text) > PREVIEW_MAX_CHARS)
+        if suffix == ".xlsx":
+            rows = _xlsx_rows(attachment.path)
+            return AttachmentPreview(kind="table", rows=rows[:PREVIEW_MAX_ROWS], truncated=len(rows) > PREVIEW_MAX_ROWS)
+    except Exception:  # noqa: BLE001 - предпросмотр не должен ронять страницу
+        return AttachmentPreview(kind="unsupported")
+    return AttachmentPreview(kind="unsupported")
 
 
 def ask_assistant(

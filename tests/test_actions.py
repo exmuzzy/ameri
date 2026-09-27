@@ -3,7 +3,7 @@ from pathlib import Path
 from ameri import actions
 from ameri.harness import assistant_prompt, load_access
 from ameri.auth import User
-from ameri.store import Store, Usage
+from ameri.store import Attachment, Store, Usage
 
 HARNESS = Path(__file__).resolve().parents[1] / "harness"
 
@@ -87,6 +87,79 @@ def test_odt_text(tmp_path):
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("content.xml", content)
     assert actions.odt_text(path) == "Тема: Воздуховоды\nВоздуховод ПП ф160 L1000 | 2 | шт"
+
+
+def _attachment(path: Path) -> Attachment:
+    return Attachment(id=1, name=path.name, path=path, size=path.stat().st_size if path.exists() else 0)
+
+
+def test_attachment_preview_text(tmp_path):
+    path = tmp_path / "note.txt"
+    path.write_text("привет мир", encoding="utf-8")
+    preview = actions.attachment_preview(_attachment(path))
+    assert preview.kind == "text"
+    assert preview.text == "привет мир"
+    assert not preview.truncated
+
+
+def test_attachment_preview_image_and_pdf_by_suffix(tmp_path):
+    image = tmp_path / "photo.png"
+    image.write_bytes(b"\x89PNG\r\n")
+    assert actions.attachment_preview(_attachment(image)).kind == "image"
+
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    assert actions.attachment_preview(_attachment(pdf)).kind == "pdf"
+
+
+def test_attachment_preview_unsupported_for_legacy_doc(tmp_path):
+    path = tmp_path / "старый.doc"
+    path.write_bytes(b"\xd0\xcf\x11\xe0")
+    assert actions.attachment_preview(_attachment(path)).kind == "unsupported"
+
+
+def test_attachment_preview_docx(tmp_path):
+    from docx import Document
+
+    path = tmp_path / "spec.docx"
+    document = Document()
+    document.add_paragraph("Раздел 1")
+    document.add_paragraph("Воздуховод ф160")
+    document.save(path)
+    preview = actions.attachment_preview(_attachment(path))
+    assert preview.kind == "text"
+    assert preview.text == "Раздел 1\nВоздуховод ф160"
+
+
+def test_attachment_preview_xlsx(tmp_path):
+    from openpyxl import Workbook
+
+    path = tmp_path / "spec.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Наименование", "Кол-во"])
+    sheet.append(["Воздуховод ф160", 2])
+    workbook.save(path)
+    preview = actions.attachment_preview(_attachment(path))
+    assert preview.kind == "table"
+    assert preview.rows == [["Наименование", "Кол-во"], ["Воздуховод ф160", "2"]]
+    assert not preview.truncated
+
+
+def test_attachment_preview_odt(tmp_path):
+    import zipfile
+
+    content = (
+        '<office:document-content xmlns:office="o" xmlns:text="t"><office:body><office:text>'
+        "<text:p>Тема: Воздуховоды</text:p>"
+        "</office:text></office:body></office:document-content>"
+    )
+    path = tmp_path / "spec.odt"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("content.xml", content)
+    preview = actions.attachment_preview(_attachment(path))
+    assert preview.kind == "text"
+    assert preview.text == "Тема: Воздуховоды"
 
 
 def test_non_ascii_key_gives_clear_message():
