@@ -34,6 +34,7 @@ app/views/about.py, howto.py  статьи из docs/site/*.md («Как учи�
 app/views/materials.py      «Материалы отрасли»: поиск, документ, раздел по ссылке ?doc=&section=
 src/ameri/store.py          SQLite: chats, messages, attachments, feedback, onboarding; миграции
 src/ameri/auth.py           users.toml, scrypt-хэши, save_users
+src/ameri/session.py        «запомнить вход»: подписанная cookie сайта на 30 дней (не токен API)
 src/ameri/harness.py        access.yaml, assistant_prompt, HarnessRepo (правила, примеры, git commit/pull/push)
 src/ameri/llm.py            DeepSeekChat: OpenAI-совместимый API, usage с cache hit, ретрай
 src/ameri/chat_service.py   отправка сообщения и «Исправить и научить» — общее для сайта и API

@@ -164,13 +164,6 @@ def run_scenario(api: Api, users: dict, scenario: dict, recreate: bool = False) 
     log(f"#{scenario['id']} «{title}» — чат {chat['id']}")
     for step in scenario["steps"]:
         who = users[step["as"]]["login"]
-        words = step.get("when_answer_contains")
-        if words:
-            answer = last_answer(api, who, chat["id"])
-            content = (answer or {}).get("content", "").lower()
-            if not any(word.lower() in content for word in words):
-                log(f"  шаг пропущен: в ответе нет ни одного из {words}")
-                continue
         if "feedback" in step:
             feedback(api, who, chat["id"], step["feedback"])
         else:
