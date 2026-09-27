@@ -100,3 +100,19 @@ def test_assistant_article_page(site):
     assert "### Отраслевые источники" in text and "## Текущие правила" in text
     links = [(p.proto.label, p.proto.page) for p in at.get("page_link")]
     assert ("Открыть материалы отрасли", "materials") in links
+
+
+def test_calculation_questions_page_for_leader_only(site):
+    at = AppTest.from_file(str(ROOT / "app" / "main.py"), default_timeout=60)
+    at.session_state["user"] = User("boss", "Руководитель", "leader", "x")
+    at.run()
+    pages = {i.get("url_pathname"): h for h, i in at._registered_pages.items()}
+    assert "questions" in pages
+    at._page_hash = pages["questions"]
+    at.run()
+    assert not at.exception
+    text = " ".join(m.value for m in at.markdown)
+    assert "Q37. Нарезка метража" in text and "Q51" in text
+
+    manager = open_app()
+    assert "questions" not in {i.get("url_pathname") for i in manager._registered_pages.values()}

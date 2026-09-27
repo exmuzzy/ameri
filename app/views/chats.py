@@ -131,6 +131,10 @@ def _render_attachment_preview(attachment: Attachment) -> None:
             'width="100%" height="600" style="border:none"></iframe>',
             unsafe_allow_html=True,
         )
+    elif preview.kind == "markdown":
+        st.markdown(preview.text or "(пустой файл)")
+        if preview.truncated:
+            st.caption("Показана часть файла — скачайте, чтобы увидеть целиком.")
     elif preview.kind == "text":
         st.text(preview.text or "(пустой файл)")
         if preview.truncated:
