@@ -89,7 +89,8 @@ DEEPSEEK_API_KEY=... AMERI_DUCT_CALC_DIR=/путь/к/duct-calc python tools/run
 - Streamlit: `st.switch_page` теряет `st.query_params` — передавай `query_params=` аргументом.
 - В контейнере нет `.git` в `/app`: харнес читается из `/data/repo` (клонирует `deploy/entrypoint.sh`). Коммиты харнеса с сайта идут туда; в GitHub — только с токеном (`AMERI_GIT_PUSH=1`).
 - Прототип duct-calc подключается через `sys.path` и monkeypatch-ит `pipeline.build_system_prompt` и списки ключевых слов (`_install_harness`) — не правь его код из ameri, а расширяй через `harness/duct_calc/`.
-- `.odt` прототип не читает: `actions.odt_text` превращает его в Markdown.
+- Таблицы `.md`, `.odt` и обычный `.csv` прототип разбирает плохо (шапка — как позиция, «14 мп» — как 14 шт по 14 м): `actions.spec_lines_text` передаёт их построчно «Наименование — количество ед.», как заказ Word. CSV сначала пробует CSV-модуль прототипа. Красные позиции из XLSX `actions.red_positions` перечисляет в ответе расчётки.
+- Ассистент получает `harness/duct_calc/parse_rules.md` в системном промпте (`duct_parse_rules_for_assistant`), чтобы не спрашивать у клиента то, что решено правилами разбора.
 - DeepSeek: для ответов в чате `thinking` выключен (иначе `temperature` игнорируется); `total_cost` не считаем по ценам Anthropic — только по `usage`.
 - Ссылки на разделы материалов — `/materials?doc=<id>&section=<id>`. В чате `materials.split_links` превращает их в `st.page_link`: обычная Markdown-ссылка открыла бы новую вкладку без входа.
 - Ключевые слова `params.yaml` прототип ищет как подстроки: слово не должно встречаться в названиях своих изделий (`tests/test_duct_params.py`).

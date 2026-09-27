@@ -98,3 +98,53 @@ def test_non_ascii_key_gives_clear_message():
     assert key_problem("sk-abc 123") == BAD_KEY_MESSAGE
     with pytest.raises(LlmError, match="недопустимые символы"):
         DeepSeekChat(base_url="https://x", api_key="sk-вставьте ключ", model="m")
+
+
+def test_spec_lines_from_tables(tmp_path):
+    md = tmp_path / "s.md"
+    md.write_text(
+        "# Приток П2\n\n| № | Наименование | Кол-во | Ед. |\n|---|---|---|---|\n"
+        "| 1 | Воздуховод ПП 400×300 δ=4 | 8 | м |\n| 2 | Отвод 90° ПП ф160 | 2 | шт |\n",
+        encoding="utf-8",
+    )
+    assert actions.spec_lines_text(md).splitlines() == [
+        "Приток П2",
+        "Воздуховод ПП 400×300 δ=4 — 8 м",
+        "Отвод 90° ПП ф160 — 2 шт",
+    ]
+    csv_file = tmp_path / "s.csv"
+    csv_file.write_text("№;Наименование;Кол-во;Ед. изм.\n1;Воздуховод ПП ф160 (В1);10;мп\n2;Хомут ф160;4;шт\n", encoding="utf-8")
+    assert actions.spec_lines_text(csv_file).splitlines() == ["Воздуховод ПП ф160 (В1) — 10 мп", "Хомут ф160 — 4 шт"]
+    assert actions.spec_lines_text(tmp_path / "x.xlsx") is None
+
+
+def test_spec_lines_from_odt_keeps_system_headings():
+    demo = Path(__file__).resolve().parents[1] / "demo" / "specs" / "06-ceh-pokraski-v1-p1.odt"
+    lines = actions.spec_lines_text(demo).splitlines()
+    assert "Система П1" in lines
+    assert "Воздуховод ПП ∅400 δ=4 — 14 мп" in lines
+    assert not any("Наименование" in line for line in lines)
+
+
+def test_red_positions_from_result(tmp_path):
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append([None, 1, "Воздуховод ПП ф315\t10\tмп\tКол-во: 10 мп — отрезки по 1500 мм"])
+    sheet.append([None, 2, "Переход ПП ф315\t2\tшт\tКол-во: 2 шт (проблема: Позиция 5: не указан размер d_out)"])
+    sheet.append([None, 3, "Отвод 90° ПП\t3\tшт (проблема: Позиция 6: тип не распознан)"])
+    path = tmp_path / "r.xlsx"
+    book.save(path)
+    assert actions.red_positions(path) == [
+        "«Переход ПП ф315 · 2 · шт» — не указан второй диаметр (выход)",
+        "«Отвод 90° ПП · 3 · шт» — тип не распознан",
+    ]
+    assert actions.red_positions(tmp_path / "нет.xlsx") == []
+
+
+def test_assistant_prompt_includes_parse_rules():
+    prompt = assistant_prompt(HARNESS)
+    assert "Как расчётка понимает строки спецификаций" in prompt
+    assert "Тройник без размера ответвления" in prompt
+    assert prompt.index("Как расчётка понимает") < prompt.index("Примеры правильных")
