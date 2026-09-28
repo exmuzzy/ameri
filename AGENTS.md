@@ -30,7 +30,8 @@ app/views/onboarding.py     «Новому сотруднику»: чек-лис
 app/views/admin.py          «Настройки»: обновление, ключ DeepSeek, пользователи
 app/views/api_access.py     «Доступ к API»: личные токены (store.api_tokens, в базе — хэш)
 app/views/updates.py        кнопка «Обновить сайт» и статус обновления (логика — src/ameri/updates.py)
-app/views/about.py, howto.py  статьи из docs/site/*.md («Как учится ассистент» — howto.render_assistant)
+app/views/about.py, howto.py  статьи из docs/site/*.md («Как учится ассистент» — howto.render_assistant;
+                            «План развития» — howto.render_roadmap, docs/site/roadmap.md: недоработки и этапы)
                             «Вопросы по расчёту» (руководителю) — howto.render_questions, docs/site/questions.md
 app/views/materials.py      «Материалы отрасли»: поиск, документ, раздел по ссылке ?doc=&section=
 src/ameri/store.py          SQLite: chats, messages, attachments, feedback, onboarding; миграции

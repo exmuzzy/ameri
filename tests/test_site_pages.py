@@ -102,6 +102,15 @@ def test_assistant_article_page(site):
     assert ("Открыть материалы отрасли", "materials") in links
 
 
+def test_roadmap_article_page(site):
+    at = open_app("roadmap")
+    assert not at.exception
+    text = "\n".join(m.value for m in at.markdown)
+    assert "## Где хранятся файлы" in text and "## Теги и облако тегов" in text
+    assert "## Ассистент пообещал файл, который не мог прислать" in text
+    assert "10 · [Как проверяем изменения](#am-section-10)" in text
+
+
 def test_calculation_questions_page_for_leader_only(site):
     at = AppTest.from_file(str(ROOT / "app" / "main.py"), default_timeout=60)
     at.session_state["user"] = User("boss", "Руководитель", "leader", "x")

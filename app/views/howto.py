@@ -18,6 +18,10 @@ def render_questions() -> None:
     article((get_settings().site_dir / "questions.md").read_text(encoding="utf-8"), toc=True)
 
 
+def render_roadmap() -> None:
+    article((get_settings().site_dir / "roadmap.md").read_text(encoding="utf-8"), toc=True)
+
+
 def render_assistant() -> None:
     article((get_settings().site_dir / "assistant.md").read_text(encoding="utf-8"), toc=True)
     st.page_link(

@@ -93,6 +93,7 @@ work = [
     st.Page(howto.render, title="Как работать", icon=":material/menu_book:", url_path="howto"),
     st.Page(howto.render_examples, title="Примеры работы", icon=":material/description:", url_path="examples"),
     st.Page(howto.render_assistant, title="Как учится ассистент", icon=":material/auto_stories:", url_path="assistant"),
+    st.Page(howto.render_roadmap, title="План развития", icon=":material/route:", url_path="roadmap"),
     materials_page,
     st.Page(api_access.render, title="Доступ к API", icon=":material/key:", url_path="api"),
 ]
