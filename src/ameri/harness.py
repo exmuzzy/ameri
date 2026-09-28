@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -57,8 +57,18 @@ def list_rules(harness_dir: Path) -> list[HarnessFile]:
     return _read_dir(harness_dir, RULES_DIR)
 
 
+def _example_title(text: str, fallback: str) -> str:
+    """Заголовок Примера — первая строка вопроса: сам файл всегда начинается с «### Вопрос»."""
+
+    for line in text.splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line if len(line) <= 100 else line[:99].rstrip() + "…"
+    return fallback
+
+
 def list_examples(harness_dir: Path) -> list[HarnessFile]:
-    return _read_dir(harness_dir, EXAMPLES_DIR)
+    return [replace(e, title=_example_title(e.text, e.title)) for e in _read_dir(harness_dir, EXAMPLES_DIR)]
 
 
 PARSE_RULES_FILE = Path("duct_calc") / "parse_rules.md"

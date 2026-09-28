@@ -125,3 +125,21 @@ def test_calculation_questions_page_for_leader_only(site):
 
     manager = open_app()
     assert "questions" not in {i.get("url_pathname") for i in manager._registered_pages.values()}
+
+
+def test_harness_page_for_leader(site):
+    at = AppTest.from_file(str(ROOT / "app" / "main.py"), default_timeout=60)
+    at.session_state["user"] = User("boss", "Руководитель", "leader", "x")
+    at.run()
+    at._page_hash = next(h for h, i in at._registered_pages.items() if i.get("url_pathname") == "harness")
+    at.run()
+    assert not at.exception
+    assert [t.label for t in at.tabs] == [
+        "На утверждении", "Правила", "Примеры", "Промпт", "История изменений", "Обновление",
+    ]
+    assert {"Основной промпт ассистента", "История изменений", "Обновление сайта"} <= {s.value for s in at.subheader}
+    titles = [e.label for e in at.expander]
+    assert "Вопрос" not in titles
+    assert any(t.startswith("В спецификации строка «Переход ф450/600х300") for t in titles)
+    delete_keys = [b.key for b in at.button if b.label == "Удалить"]
+    assert len(delete_keys) == len(set(delete_keys))

@@ -61,7 +61,8 @@ def _files(kind: str, items) -> None:
     for item in items:
         with st.expander(item.title):
             st.markdown(item.text)
-            if st.button("Удалить", key=f"del-{item.path.name}"):
+            # Правило и Пример могут называться одинаково, а вкладки рисуются все сразу — ключ с именем папки.
+            if st.button("Удалить", key=f"del-{item.path.parent.name}-{item.path.name}"):
                 repo.remove(item.path)
                 sha, message = repo.commit(f"Харнес: удалено «{item.title}»", author=current_user())
                 st.success(message)
