@@ -16,4 +16,4 @@ positions:
   - {line: "Заглушка аналог", red: false, type: cap_round}
   - {line: "200х200х200", red: false, type: tee_round_round}
   - {line: "толщ.2,3мм, Ø110", red: false, type: straight_round}
-  - {line: "Ø110/400х200", red: true}
+  - {line: "Ø110/400х200", red: false, type: transition_rect_round}
