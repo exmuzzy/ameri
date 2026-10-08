@@ -5,7 +5,6 @@ connection: socket
 # ф250 6 мп → L1500 × 4; сетка → «Решетка ПП ф250»; «Зонт круглый 250» → «Зонт крышный ПП ф250»;
 # тройник ф250/ф160 под 45° — L 450; переход ф200/250х250 — раструб/фланец, стенка 4 мм; стенка остальных — 2 мм.
 positions:
-  - {line: "Вытяжка из химлаборатории", red: false, type: null, heading: true}
   - {line: "полипропилен ⌀160", red: false, type: straight_round}
   - {line: "полипропилен ⌀200", red: false, type: straight_round}
   - {line: "полипропилен ⌀250", red: false, type: straight_round}
