@@ -102,6 +102,9 @@ def _is_header(cells: list[str]) -> bool:
     )
 
 
+UNIT_CELL = re.compile(r"(?:м|мп|м\.\s*п|п\.?\s*м|пог\.?\s*м|шт|м2|м²|кв\.?\s*м|компл|к-т|кг)\.?", re.IGNORECASE)
+
+
 def table_lines(rows: list[list[str]]) -> list[tuple[str, str | None]]:
     """Строки таблицы спецификации — (текст «Наименование — количество ед.», количество).
 
@@ -124,7 +127,11 @@ def table_lines(rows: list[list[str]]) -> list[tuple[str, str | None]]:
         if len(cells) == 1:
             lines.append((cells[0], None))
             continue
-        quantity = next((c.replace(",", ".") for c in cells[1:] if re.fullmatch(r"\d+(?:[.,]\d+)?", c)), None)
+        index = next((i for i, c in enumerate(cells) if i and re.fullmatch(r"\d+(?:[.,]\d+)?", c)), None)
+        quantity = cells[index].replace(",", ".") if index else None
+        if index and index > 1 and UNIT_CELL.fullmatch(cells[index - 1]):
+            # Прототип узнаёт метраж только как «54.8 м», не «м. 54.8».
+            cells[index - 1], cells[index] = cells[index], cells[index - 1]
         lines.append((f"{cells[0]} — {' '.join(cells[1:])}", quantity))
     return lines
 

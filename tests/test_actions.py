@@ -351,6 +351,27 @@ def test_xlsx_without_index_column_becomes_numbered_lines(tmp_path):
     assert actions.spec_lines_text(numbered) is None  # с «№» позиции делит сам прототип
 
 
+def test_unit_column_before_quantity_gives_number_then_unit(tmp_path):
+    """Прототип узнаёт метраж только как «54.8 м»: при «м. 54.8» прямой участок не режется по 1500,
+    а модель ставит 54,8 шт по 54 800 мм. Колонка «Ед.» перед «Кол-вом» — частый вид спецификаций."""
+
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append([None, None, "Система Во 1.1"])
+    sheet.append([None, None, "Скруббер STRADA CLEAN C 18-35-750", "ХИМВЕНТ-Н-О-810", None, None, "шт.", 1])
+    sheet.append([None, None, "Воздуховод из полипропилена ø150, толщ. 3,0 мм", None, None, None, "м.", 54.8])
+    sheet.append([None, None, "Воздуховод из полипропилена ø900, толщ. 5,0 мм", None, None, None, "м.", 0.5])
+    path = tmp_path / "unit_first.xlsx"
+    book.save(path)
+    assert actions.spec_lines_text(path).splitlines() == [
+        "1. Скруббер STRADA CLEAN C 18-35-750 — ХИМВЕНТ-Н-О-810 1 шт.; система Во 1.1; кол-во: 1",
+        "2. Воздуховод из полипропилена ø150, толщ. 3,0 мм — 54.8 м.; система Во 1.1; кол-во: 54.8",
+        "3. Воздуховод из полипропилена ø900, толщ. 5,0 мм — 0.5 м.; система Во 1.1; кол-во: 0.5",
+    ]
+
+
 def fake_prototype(tmp_path, error: str) -> Path:
     """Минимальный duct-calc: pipeline падает с ValueError, как прототип на файле без позиций."""
 
