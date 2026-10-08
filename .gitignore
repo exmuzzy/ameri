@@ -4,3 +4,4 @@ __pycache__/
 var/
 .pytest_cache/
 deploy/.env
+duct-calc/

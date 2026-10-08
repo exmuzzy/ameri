@@ -589,66 +589,11 @@ def preview_without_headings(preview, compare_completeness):
     )
 
 
-SEGMENT_MM = 1500
-
-
-def equal_segments(total_mm) -> list[tuple[int, object]]:
-    """Q37 (б): метраж — равными частями не длиннее 1500 мм: 3000 → 2 × 1500, 2000 → 2 × 1000.
-
-    Возвращает [(количество, длина_мм)]; если поровну до миллиметра не делится, последний кусок
-    длиннее на остаток: 3200 → 2 × 1066 + 1 × 1068.
-    """
-
-    import math
-    from decimal import ROUND_FLOOR, Decimal
-
-    total = Decimal(str(total_mm))
-    count = math.ceil(total / SEGMENT_MM)
-    base = (total / count).quantize(Decimal(1), rounding=ROUND_FLOOR)
-    rest = total - base * count
-    if rest == 0:
-        return [(count, base)]
-    if count == 1:
-        return [(1, total)]
-    return [(count - 1, base), (1, base + rest)]
-
-
-def _segment_label(length) -> str:
-    return f"{length.normalize():f}"
-
-
-def _install_segments(pipeline) -> None:
-    """Q37 (б) вместо нарезки прототипа «по 1500 и остаток»."""
-
-    from dataclasses import replace
-
-    def meter_segment_rows(position, coefficients, *, total_meters, system, connection_type):
-        if total_meters <= 0:
-            raise pipeline.CalculationNeedsInput(
-                f"Позиция {position.source_no}: количество метров должно быть больше нуля", code="invalid_qty"
-            )
-        return [
-            pipeline.position_to_output_row(
-                replace(
-                    position,
-                    qty=count,
-                    length_mm=float(length),
-                    source_text=f"{position.source_text} — {count} шт по {_segment_label(length)} мм",
-                ),
-                coefficients,
-                system=system,
-                connection_type=connection_type,
-            )
-            for count, length in equal_segments(total_meters * 1000)
-        ]
-
-    pipeline._meter_segment_rows = meter_segment_rows
-
-
 def _install_decisions(pipeline) -> None:
-    """Q37, Q38 и Q39 поверх прототипа: оборачиваем его функции, исходные сохраняем для повторной установки."""
+    """Q38 и Q39 поверх прототипа: оборачиваем его функции, исходные сохраняем для повторной установки.
 
-    _install_segments(pipeline)
+    Q37 (1500 + остаток) делает сам прототип, нарезку метража не перехватываем.
+    """
 
     neck = getattr(pipeline, "_ameri_original_umbrella_neck", None) or pipeline.with_umbrella_optional_neck_key
     pipeline._ameri_original_umbrella_neck = neck
