@@ -394,19 +394,25 @@ def test_duct_calc_explains_spec_without_positions(tmp_path, monkeypatch):
         del sys.modules[name]
 
 
-def test_equal_segments_q37():
-    from decimal import Decimal as D
+def test_harness_keeps_prototype_meter_cutting_q37(tmp_path, monkeypatch):
+    """Q37 (а): метраж режет сам прототип — 1500 мм и остаток; Харнес не подменяет его нарезку."""
 
-    assert actions.equal_segments(2000) == [(2, D(1000))]
-    assert actions.equal_segments(3000) == [(2, D(1500))]
-    assert actions.equal_segments(1500) == [(1, D(1500))]
-    assert actions.equal_segments(900) == [(1, D(900))]
-    assert actions.equal_segments(5000) == [(4, D(1250))]
-    assert actions.equal_segments(3200) == [(2, D(1066)), (1, D(1068))]
-    for total in (1234, 3200, 14000, 17000):
-        parts = actions.equal_segments(total)
-        assert sum(n * length for n, length in parts) == total
-        assert all(length <= 1500 for _, length in parts)
+    import sys
+
+    for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+        monkeypatch.delitem(sys.modules, name)
+    proto = fake_prototype(tmp_path, "не важно")
+    monkeypatch.setattr(sys, "path", [str(proto / "src"), *sys.path])
+    from duct_calc import pipeline
+
+    def prototype_cutting(*args, **kwargs):
+        return "нарезка прототипа"
+
+    pipeline._meter_segment_rows = prototype_cutting
+    actions._install_harness(None)
+    assert pipeline._meter_segment_rows is prototype_cutting
+    for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+        del sys.modules[name]
 
 
 def test_result_notes_umbrella_and_flange20(tmp_path):
