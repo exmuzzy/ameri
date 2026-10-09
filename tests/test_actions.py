@@ -260,11 +260,12 @@ class _Position:
     questions: tuple = ()
 
 
-def test_round_umbrella_single_size_gets_double_dome():
+def test_round_umbrella_single_size_gets_dome_neck_plus_1000():
+    # Решение 09.10.2026: купол = патрубок + 2 × 500 (вылет), как в скилле; было 2 × патрубок.
     position = _Position("1", "Зонт круглый 250", "umbrella_round", 1, size={"d": 250},
                          questions=(_Question("missing_size_d_dome", "Не указан диаметр купола"),))
     fixed = actions.umbrella_with_dome(position)
-    assert fixed.size["d_neck"] == 250 and fixed.size["d_dome"] == 500
+    assert fixed.size["d_neck"] == 250 and fixed.size["d_dome"] == 1250
     assert fixed.questions == ()
     explicit = _Position("2", "Зонт", "umbrella_round", 1, size={"d_neck": 250, "d_dome": 450})
     assert actions.umbrella_with_dome(explicit).size["d_dome"] == 450
@@ -369,6 +370,28 @@ def test_unit_column_before_quantity_gives_number_then_unit(tmp_path):
         "1. Скруббер STRADA CLEAN C 18-35-750 — ХИМВЕНТ-Н-О-810 1 шт.; система Во 1.1; кол-во: 1",
         "2. Воздуховод из полипропилена ø150, толщ. 3,0 мм — 54.8 м.; система Во 1.1; кол-во: 54.8",
         "3. Воздуховод из полипропилена ø900, толщ. 5,0 мм — 0.5 м.; система Во 1.1; кол-во: 0.5",
+    ]
+
+
+def test_request_in_copy_of_our_calc_template_keeps_only_name_quantity_unit(tmp_path):
+    """Заявка 09.10.2026 пришла в копии нашей расчётки: шапка «Номенклатура … S элемента, м2» с цифрой
+    становилась позицией № 1 и сдвигала номера, а нули и #DIV/0! расчётных колонок попадали в каждую строку."""
+
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append(["Номенклатура ", "Кол-во", "Ед.изм.", "Толщина материала в мм", "S элемента, м2", "S общ ",
+                  "Цена  кг  ", "Плотность", "% на раскрой", "К/эф", "Цена за шт без соединения, руб",
+                  "ИТОГО без соединения", "СОЕДИНЕНИЕ", "Цена за шт с соединением, руб",
+                  "ИТОГО с соединением, руб", "Масса воздуховодов всего, с креплением, кг *"])
+    sheet.append(["Дроссель клапан  ПП  400х250 фф", 2, "шт", *[None] * 10, 0, 0, "#DIV/0!"])
+    sheet.append(["Шумоглушитель ПП ф500 L 900 фф", 1, "шт", *[None] * 10, 0, 0, "#DIV/0!"])
+    path = tmp_path / "client.xlsx"
+    book.save(path)
+    assert actions.spec_lines_text(path).splitlines() == [
+        "1. Дроссель клапан ПП 400х250 фф — 2 шт; кол-во: 2",
+        "2. Шумоглушитель ПП ф500 L 900 фф — 1 шт; кол-во: 1",
     ]
 
 
