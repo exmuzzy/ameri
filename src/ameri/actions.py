@@ -315,6 +315,19 @@ def _result_names(xlsx: Path) -> list[str]:
     return names
 
 
+def _umbrella_note(name: str) -> str:
+    """Как посчитан зонт: вытяжной — островной по размерам из строки, остальные — с куполом по Q38."""
+
+    lower = name.lower()
+    short = name.split(" — ")[0][:90]
+    if "вытяжн" in lower or "остров" in lower:
+        note = "островной: низ, площадка (верх) и высота из строки"
+        if "врезк" in lower:
+            note += ", врезка — L200 и 1 фланец"
+        return f"- «{short}» — {note}"
+    return f"- «{short}» — купол взят как патрубок + 1000 мм, если не указан"
+
+
 def result_notes(xlsx: Path, connection_label: str) -> list[str]:
     """Что менеджер проверяет сам после расчётки: зонты (Q38) и «фланец 20» (Q40)."""
 
@@ -322,10 +335,7 @@ def result_notes(xlsx: Path, connection_label: str) -> list[str]:
     notes = []
     umbrellas = [n for n in names if "зонт" in n.lower()]
     if umbrellas:
-        notes.append(
-            "Проверьте зонты вручную — купол взят как патрубок + 1000 мм, если не указан:\n"
-            + "\n".join(f"- «{n[:90]}»" for n in umbrellas)
-        )
+        notes.append("Проверьте зонты вручную:\n" + "\n".join(_umbrella_note(n) for n in umbrellas))
     flanges = [n for n in names if FLANGE_20.search(n)]
     if flanges:
         where = (
@@ -613,6 +623,37 @@ def preview_without_headings(preview, compare_completeness):
     )
 
 
+def without_model_warnings(preview):
+    """Убрать из предупреждений свободный текст модели разбора («element_type = null…»).
+
+    Модель описывает свой промежуточный шаг, а не результат: особые изделия и толщины дальше считает код.
+    Предупреждения кода (полнота разбора, нарезка на части) остаются.
+    """
+
+    from dataclasses import replace
+
+    model = set(preview.response.warnings)
+    if not model:
+        return preview
+    return replace(preview, warnings=tuple(w for w in preview.warnings if w not in model))
+
+
+_COEFFICIENT_NOTE = re.compile(r"Коэффициент ([LM]) для (.+) взят из скилла")
+
+
+def manager_warning(text: str) -> str:
+    """Предупреждение прототипа — словами менеджера; остальные без изменений."""
+
+    match = _COEFFICIENT_NOTE.fullmatch(text)
+    if match is None:
+        return text
+    letter, category = match.groups()
+    if (letter, category) == ("L", "нестандарт фасон"):
+        return "Раскрой нестандартных изделий (зонты, клапаны, шумоглушители) — 1,5 (в шаблоне «от 1,5, уточнять»)."
+    what = "Раскрой" if letter == "L" else "Коэффициент на работу"
+    return f"{what} для «{category}» взят по умолчанию: в шаблоне расчётки вместо числа текст."
+
+
 def _install_decisions(pipeline) -> None:
     """Q38 и Q39 поверх прототипа: оборачиваем его функции, исходные сохраняем для повторной установки.
 
@@ -625,8 +666,8 @@ def _install_decisions(pipeline) -> None:
 
     preview = getattr(pipeline, "_ameri_original_preview", None) or pipeline.preview_specification
     pipeline._ameri_original_preview = preview
-    pipeline.preview_specification = lambda **kwargs: preview_without_headings(
-        preview(**kwargs), pipeline.compare_completeness
+    pipeline.preview_specification = lambda **kwargs: without_model_warnings(
+        preview_without_headings(preview(**kwargs), pipeline.compare_completeness)
     )
 
 
@@ -740,6 +781,9 @@ def duct_calc(
                 "Красные позиции — не посчитаны, нужно уточнить:\n" + "\n".join(f"- {item}" for item in red)
             )
         lines += result_notes(output, connection_label)
-        if result.warnings:
-            lines.append("Предупреждения: " + "; ".join(result.warnings))
+        notes = [manager_warning(w) for w in result.warnings if _COEFFICIENT_NOTE.fullmatch(w)]
+        warnings = [w for w in result.warnings if not _COEFFICIENT_NOTE.fullmatch(w)]
+        lines += notes
+        if warnings:
+            lines.append("Предупреждения: " + "; ".join(warnings))
         return ActionResult(text="\n\n".join(lines), files=[(output.name, output.read_bytes())])

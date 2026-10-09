@@ -476,3 +476,39 @@ def test_result_notes_umbrella_and_flange20(tmp_path):
     assert "шинорейка 20" in notes[1] and "«раструб»" in notes[1] and "фланец20" in notes[1]
     assert "стандартным фланцем" in actions.result_notes(path, "Фланец")[1]
     assert not actions.FLANGE_20.search("Воздуховод ф200")
+
+
+def test_umbrella_note_depends_on_type(tmp_path):
+    """У вытяжного (островного) зонта купола нет — подпись «купол = патрубок + 1000» его вводила в заблуждение."""
+
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append([None, 4, "Зонт вытяжной ПП 1400х1000 Н300 врезка ф315 площадка 700х500 ф — 3 шт; кол-во: 3"])
+    sheet.append([None, 5, "Зонт крышный ПП ф500 ф — 1 шт; кол-во: 1"])
+    path = tmp_path / "r.xlsx"
+    book.save(path)
+    island, roof = actions.result_notes(path, "Фланец")[0].splitlines()[1:]
+    assert island.startswith("- «Зонт вытяжной ПП 1400х1000 Н300 врезка ф315 площадка 700х500 ф» — островной")
+    assert "врезка — L200 и 1 фланец" in island and "купол" not in island
+    assert roof == "- «Зонт крышный ПП ф500 ф» — купол взят как патрубок + 1000 мм, если не указан"
+
+
+def test_manager_message_drops_model_warnings_keeps_code_ones():
+    """Свободный текст модели («element_type = null…») — её промежуточный шаг, менеджеру он не нужен;
+    сигнал кода о полноте разбора остаётся."""
+
+    @_dc(frozen=True)
+    class Preview:
+        response: object
+        warnings: tuple
+
+    model = "Позиции «Шумоглушитель» — вне каталога типов: element_type = null."
+    code = "В разборе есть позиции без корректного количества"
+    preview = Preview(_NS(warnings=(model,)), (model, code))
+    assert actions.without_model_warnings(preview).warnings == (code,)
+    assert actions.manager_warning("Коэффициент L для нестандарт фасон взят из скилла") == (
+        "Раскрой нестандартных изделий (зонты, клапаны, шумоглушители) — 1,5 (в шаблоне «от 1,5, уточнять»)."
+    )
+    assert actions.manager_warning(code) == code
