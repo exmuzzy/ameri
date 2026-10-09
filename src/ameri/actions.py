@@ -89,16 +89,28 @@ def odt_text(path: Path) -> str:
     return "\n".join(lines)
 
 
-HEADER_WORDS = ("наименование", "кол-во", "количество", "ед.", "ед ", "единица", "позиция", "примечание")
+HEADER_WORDS = (
+    "наименование", "номенклатура", "кол-во", "количество", "ед.", "ед ", "единица", "позиция", "примечание"
+)
 INDEX_HEADERS = ("№", "n", "no", "№ п/п", "поз.", "поз")
+# Расчётные колонки (клиенты присылают заявку в копии нашей расчётки): их нули и #DIV/0! — не текст позиции.
+CALC_HEADERS = (
+    "s ", "площад", "цена", "плотност", "% на", "раскрой", "к/эф", "коэф", "итого", "соединени", "масса",
+    "стоимост", "сумма",
+)
+EXCEL_ERROR = re.compile(r"#(?:DIV/0!|N/A|VALUE!|REF!|NAME\?|NUM!|NULL!)", re.IGNORECASE)
 
 
 def _is_header(cells: list[str]) -> bool:
-    """Шапка таблицы: нет цифр, и хотя бы одна ячейка — «Наименование», «Кол-во», «Ед.»…"""
+    """Шапка таблицы: несколько ячеек, ни одной с числом, хотя бы одна — «Наименование», «Кол-во», «Ед.»…
 
-    text = " ".join(cells).lower()
-    return not any(ch.isdigit() for ch in text) and any(
-        cell.lower().strip().startswith(HEADER_WORDS) or cell.strip().lower() in INDEX_HEADERS for cell in cells
+    Цифры внутри подписей бывают («S элемента, м2»), поэтому отличаем шапку от позиции по ячейке-числу.
+    """
+
+    return (
+        len(cells) > 1
+        and not any(re.fullmatch(r"\d+(?:[.,]\d+)?", cell) for cell in cells)
+        and any(cell.lower().strip().startswith(HEADER_WORDS) or cell.strip().lower() in INDEX_HEADERS for cell in cells)
     )
 
 
@@ -110,17 +122,22 @@ def table_lines(rows: list[list[str]]) -> list[tuple[str, str | None]]:
 
     Шапка и колонка с номером строки убираются: модель разбора путает их с позициями
     и с количеством. Строка из одной ячейки — заголовок раздела, количество у неё None.
+    Колонки шапки с расчётом (площадь, цена, итого) и ошибки Excel в текст не попадают.
     """
 
     lines: list[tuple[str, str | None]] = []
     index_column = False
+    calc_columns: set[int] = set()
     for raw in rows:
         cells = [" ".join(str(cell).split()) for cell in raw]
-        cells = [cell for cell in cells if cell]
-        if not cells:
+        if _is_header([cell for cell in cells if cell]):
+            index_column = next(cell for cell in cells if cell).lower() in INDEX_HEADERS
+            calc_columns = {i for i, cell in enumerate(cells) if cell.lower().startswith(CALC_HEADERS)}
             continue
-        if _is_header(cells):
-            index_column = cells[0].strip().lower() in INDEX_HEADERS
+        cells = [
+            cell for i, cell in enumerate(cells) if cell and i not in calc_columns and not EXCEL_ERROR.fullmatch(cell)
+        ]
+        if not cells:
             continue
         if index_column and len(cells) > 1 and cells[0].rstrip(".").isdigit():
             cells = cells[1:]
@@ -170,13 +187,13 @@ def _xlsx_items(path: Path) -> list[list[str] | str] | None:
         for sheet in book.worksheets:
             for row in sheet.iter_rows(values_only=True):
                 cells = ["" if value is None else str(value).strip() for value in row]
-                cells = [cell for cell in cells if cell]
-                if any(cell.lower() in INDEX_HEADERS for cell in cells):
+                filled = [cell for cell in cells if cell]
+                if any(cell.lower() in INDEX_HEADERS for cell in filled):
                     return None
-                if len(cells) == 1:
-                    items.append(cells[0])
-                elif cells:
-                    items.append(cells)
+                if len(filled) == 1:
+                    items.append(filled[0])
+                elif filled:
+                    items.append(cells)  # с пустыми ячейками: колонки шапки и строк должны совпасть
             items.append("")  # граница листа
     finally:
         book.close()
@@ -306,7 +323,7 @@ def result_notes(xlsx: Path, connection_label: str) -> list[str]:
     umbrellas = [n for n in names if "зонт" in n.lower()]
     if umbrellas:
         notes.append(
-            "Проверьте зонты вручную — купол взят как 2 × патрубок, если не указан:\n"
+            "Проверьте зонты вручную — купол взят как патрубок + 1000 мм, если не указан:\n"
             + "\n".join(f"- «{n[:90]}»" for n in umbrellas)
         )
     flanges = [n for n in names if FLANGE_20.search(n)]
@@ -515,7 +532,7 @@ def _number(value: object) -> bool:
 
 
 def umbrella_with_dome(position):
-    """Q38: одно число у круглого зонта — патрубок; купол = 2 × патрубок, если не указан."""
+    """Q38: одно число у круглого зонта — патрубок; купол = патрубок + 2 × 500 (вылет), если не указан."""
 
     from dataclasses import replace
 
@@ -526,7 +543,7 @@ def umbrella_with_dome(position):
         size["d_neck"] = float(size["d"])
     if not _number(size.get("d_neck")) or _number(size.get("d_dome")):
         return replace(position, size=size)
-    size["d_dome"] = 2 * float(size["d_neck"])
+    size["d_dome"] = float(size["d_neck"]) + 1000
     questions = tuple(
         q
         for q in position.questions
