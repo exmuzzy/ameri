@@ -108,7 +108,8 @@ def test_roadmap_article_page(site):
     text = "\n".join(m.value for m in at.markdown)
     assert "## Где хранятся файлы" in text and "## Теги и облако тегов" in text
     assert "## Ассистент пообещал файл, который не мог прислать" in text
-    assert "10 · [Как проверяем изменения](#am-section-10)" in text
+    assert "## Наименования в расчётке по стандарту компании" in text
+    assert "11 · [Как проверяем изменения](#am-section-11)" in text
 
 
 def test_calculation_questions_page_for_leader_only(site):
