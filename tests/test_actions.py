@@ -402,7 +402,10 @@ def fake_prototype(tmp_path, error: str) -> Path:
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "model_client.py").write_text(
-        "class ModelClientConfig:\n    def __init__(self, **kw): pass\n"
+        "class ModelClientConfig:\n"
+        "    last = None\n"
+        "    def __init__(self, **kw):\n"
+        "        ModelClientConfig.last = kw\n"
         "class DeepSeekClient:\n    def __init__(self, config): pass\n",
         encoding="utf-8",
     )
@@ -434,6 +437,9 @@ def test_duct_calc_explains_spec_without_positions(tmp_path, monkeypatch):
         spec=spec, connection_label="Раструб", duct_calc_dir=proto, base_url="u", api_key="sk-test", model="m"
     )
     assert result.text == actions.NO_POSITIONS_TEXT
+    from duct_calc.model_client import ModelClientConfig
+
+    assert ModelClientConfig.last["timeout_seconds"] == 7 * 60
     for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
         del sys.modules[name]
 
