@@ -691,6 +691,9 @@ def _install_harness(harness_dir: Path | None) -> None:
         setattr(pipeline, attr, tuple(base) + extra)
 
 
+# На каждую часть спецификации (~90 строк). Два повтора при сбое остаются в клиенте модели.
+DUCT_MODEL_TIMEOUT_SECONDS = 7 * 60
+
 NO_POSITIONS_TEXT = (
     "Расчётка не построена: в файле не нашлось ни одной позиции с размерами и количеством. "
     "Уточните у клиента сечения, длины и количества изделий или спросите ассистента, что запросить."
@@ -717,7 +720,14 @@ def duct_calc(
     from duct_calc.model_client import DeepSeekClient, ModelClientConfig
     from duct_calc.pipeline import PipelineNeedsInput, run_specification_pipeline
 
-    client = DeepSeekClient(ModelClientConfig(base_url=base_url, api_key=api_key, model=model))
+    client = DeepSeekClient(
+        ModelClientConfig(
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            timeout_seconds=DUCT_MODEL_TIMEOUT_SECONDS,
+        )
+    )
     with tempfile.TemporaryDirectory() as tmp:
         output = Path(tmp) / f"расчетка_{spec.path.stem}.xlsx"
         template = duct_calc_dir / "data" / DUCT_TEMPLATE_NAME
