@@ -45,7 +45,8 @@ def _users_section() -> None:
         hide_index=True,
         use_container_width=True,
     )
-    with st.form("user", clear_on_submit=True):
+    # Не «user»: это имя уже занято вошедшим пользователем, а ключ формы Streamlit не даёт перезаписывать.
+    with st.form("save_user", clear_on_submit=True):
         st.markdown("**Добавить пользователя или сменить пароль**")
         login = st.text_input("Логин (латиница, цифры, точка, дефис)")
         name = st.text_input("Имя")
