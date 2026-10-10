@@ -128,6 +128,18 @@ def test_calculation_questions_page_for_leader_only(site):
     assert "questions" not in {i.get("url_pathname") for i in manager._registered_pages.values()}
 
 
+def test_settings_page_opens_for_admin(site):
+    """Форма на странице «Настройки» не должна называться user: это имя занято вошедшим пользователем."""
+
+    at = AppTest.from_file(str(ROOT / "app" / "main.py"), default_timeout=60)
+    at.session_state["user"] = User("admin", "Админ", "admin", "x")
+    at.run()
+    at._page_hash = next(h for h, i in at._registered_pages.items() if i.get("url_pathname") == "settings")
+    at.run()
+    assert not at.exception
+    assert "Пользователи" in {s.value for s in at.subheader}
+
+
 def test_harness_page_for_leader(site):
     at = AppTest.from_file(str(ROOT / "app" / "main.py"), default_timeout=60)
     at.session_state["user"] = User("boss", "Руководитель", "leader", "x")
