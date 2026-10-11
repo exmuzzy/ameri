@@ -201,23 +201,25 @@ def _chat_column(chat: Chat) -> None:
 
     feedback = get_store().feedback_for_chat(chat.id)
     can_review = access.can(user, "feedback.review")
-    with st.container(height=520, border=False):
+    # Переписка прокручивается отдельно. Панель ввода — сосед ниже, не внутри этой прокрутки.
+    with st.container(key="chat-thread", border=False):
         for message in get_store().messages(chat.id):
             _render_message(chat, message, feedback.get(message.id, []), can_review)
 
-    options = chat_service.available_actions(access, user, settings)
-    st.divider()
-    left, right = st.columns([2, 1])
-    action = left.segmented_control("Действие", options, default=options[0]) or options[0]
-    connection = None
-    if action == ACTION_DUCT:
-        connection = right.selectbox("Тип соединения", list(actions.CONNECTION_TYPES))
+    with st.container(key="chat-composer"):
+        options = chat_service.available_actions(access, user, settings)
+        st.divider()
+        left, right = st.columns([2, 1])
+        action = left.segmented_control("Действие", options, default=options[0]) or options[0]
+        connection = None
+        if action == ACTION_DUCT:
+            connection = right.selectbox("Тип соединения", list(actions.CONNECTION_TYPES))
 
-    submitted = st.chat_input(
-        "Сообщение",
-        accept_file="multiple",
-        file_type=["md", "txt", "csv", "xlsx", "docx", "doc", "odt", "pdf", "png", "jpg", "jpeg"],
-    )
+        submitted = st.chat_input(
+            "Сообщение",
+            accept_file="multiple",
+            file_type=["md", "txt", "csv", "xlsx", "docx", "doc", "odt", "pdf", "png", "jpg", "jpeg"],
+        )
     if submitted:
         files = [(f.name, f.getvalue()) for f in submitted.files]
         with st.spinner("Ассистент работает…") if action != ACTION_NOTE else nullcontext():
@@ -241,11 +243,13 @@ def render() -> None:
     st.caption("История задач и спецификаций. Выберите чат или начните новый.")
     history, current = st.columns([1, 2.6], gap="large")
     with history:
-        _history_column()
+        with st.container(key="chat-list"):
+            _history_column()
     with current:
-        chat_id = st.query_params.get("chat")
-        chat = get_store().get_chat(int(chat_id)) if chat_id and chat_id.isdigit() else None
-        if chat is None or not _can_open(chat):
-            st.info("Выберите чат в списке или создайте новый. Здесь появятся переписка и файлы по задаче.")
-            return
-        _chat_column(chat)
+        with st.container(key="chat-pane"):
+            chat_id = st.query_params.get("chat")
+            chat = get_store().get_chat(int(chat_id)) if chat_id and chat_id.isdigit() else None
+            if chat is None or not _can_open(chat):
+                st.info("Выберите чат в списке или создайте новый. Здесь появятся переписка и файлы по задаче.")
+                return
+            _chat_column(chat)
