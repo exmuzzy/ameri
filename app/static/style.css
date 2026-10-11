@@ -62,6 +62,88 @@ html, body, [data-testid="stApp"] { font-family: var(--am-font); }
 [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarCustom"]) { border-left: 3px solid var(--am-success); background: var(--am-accent-soft); }
 [data-testid="stChatInput"] { border-color: var(--am-line); border-radius: var(--am-r-md); }
 [data-testid="stChatInput"] textarea { min-height: 48px; }
+
+/* Экран «Чаты» на широком окне: страница не едет. Список и переписка крутятся сами, панель ввода стоит внизу столбца чата. */
+@media (min-width: 768px) {
+[data-testid="stMain"]:has(.st-key-chat-pane) {
+  overflow: hidden;
+}
+[data-testid="stMain"]:has(.st-key-chat-pane) [data-testid="stMainBlockContainer"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 12px;
+  box-sizing: border-box;
+}
+[data-testid="stMain"]:has(.st-key-chat-pane) [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+[data-testid="stMain"]:has(.st-key-chat-pane) [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"]:has(.st-key-chat-pane) {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+[data-testid="stMain"]:has(.st-key-chat-pane) [data-testid="stHorizontalBlock"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  align-items: stretch;
+  overflow: hidden;
+}
+[data-testid="stMain"]:has(.st-key-chat-pane) [data-testid="stColumn"] {
+  height: 100%;
+  min-height: 0 !important;
+  overflow: hidden;
+}
+[data-testid="stMain"]:has(.st-key-chat-pane) [data-testid="stColumn"] > [data-testid="stVerticalBlock"] {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+[data-testid="stMain"]:has(.st-key-chat-pane) [data-testid="stColumn"] > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"] {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.st-key-chat-list,
+.st-key-chat-pane {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.st-key-chat-list {
+  overflow-y: auto;
+}
+.st-key-chat-pane > [data-testid="stLayoutWrapper"]:has(.st-key-chat-thread) {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.st-key-chat-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+}
+.st-key-chat-pane > [data-testid="stLayoutWrapper"]:has(.st-key-chat-composer) {
+  flex: 0 0 auto !important;
+}
+.st-key-chat-composer {
+  flex: 0 0 auto !important;
+}
+}
 [data-testid="stMetric"] { border: 1px solid var(--am-line); border-radius: var(--am-r-md); background: var(--am-panel); padding: 18px 20px; min-height: 118px; box-shadow: var(--am-shadow); }
 [data-testid="stMetricValue"] { font-family: var(--am-mono); font-size: clamp(1.3rem, 2vw, 1.75rem); font-variant-numeric: tabular-nums; }
 [data-testid="stDataFrame"], [data-testid="stTable"] { font-variant-numeric: tabular-nums; }
