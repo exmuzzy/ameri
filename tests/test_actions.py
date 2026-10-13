@@ -38,9 +38,16 @@ def test_harness_files_load():
     access = load_access(HARNESS)
     manager = User("m", "M", "manager", "")
     leader = User("l", "L", "leader", "")
+    admin = User("a", "A", "admin", "")
     assert access.can(manager, "action.duct_calc")
     assert not access.can(manager, "chat.view_all")
+    assert not access.can(manager, "harness.edit")
+    assert not access.can(manager, "feedback.review")
     assert access.can(leader, "chat.view_all")
+    assert access.can(leader, "harness.edit")
+    assert access.can(leader, "feedback.review")
+    assert access.can(admin, "harness.edit")
+    assert access.can(admin, "feedback.review")
     assert "ameri" in assistant_prompt(HARNESS)
 
 
