@@ -24,3 +24,5 @@ roles:
       - action.ask
       - action.duct_calc
       - stats.view
+      - feedback.review      # «Исправить и научить» и оценки ответов
+      - harness.edit         # страница «Харнес»: утверждать Правила и Примеры, править промпт
