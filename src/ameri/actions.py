@@ -700,6 +700,42 @@ NO_POSITIONS_TEXT = (
 )
 
 
+def duct_calc_text(
+    *,
+    text: str,
+    connection_label: str,
+    duct_calc_dir: Path,
+    base_url: str,
+    api_key: str,
+    model: str,
+    harness_dir: Path | None = None,
+) -> ActionResult:
+    """Расчётка по списку позиций, введённому прямо в окне чата."""
+
+    payload = text.strip()
+    if not payload:
+        return ActionResult(
+            "Для расчётки приложите файл спецификации или напишите список позиций в сообщении."
+        )
+    with tempfile.TemporaryDirectory() as tmp:
+        source_name = "позиции-из-чата.md"
+        source = Path(tmp) / source_name
+        source.write_text(payload + "\n", encoding="utf-8")
+        result = duct_calc(
+            spec=Attachment(id=0, name=source_name, path=source, size=source.stat().st_size),
+            connection_label=connection_label,
+            duct_calc_dir=duct_calc_dir,
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            harness_dir=harness_dir,
+        )
+    prefix = f"Расчётка по файлу «{source_name}»"
+    if result.text.startswith(prefix):
+        return ActionResult(text=result.text.replace(prefix, "Расчётка по тексту из чата", 1), files=result.files)
+    return result
+
+
 def duct_calc(
     *,
     spec: Attachment,

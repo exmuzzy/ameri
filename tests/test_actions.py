@@ -451,6 +451,27 @@ def test_duct_calc_explains_spec_without_positions(tmp_path, monkeypatch):
         del sys.modules[name]
 
 
+def test_duct_calc_text_wraps_chat_message(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_duct_calc(**kwargs):
+        captured["name"] = kwargs["spec"].name
+        captured["text"] = kwargs["spec"].path.read_text(encoding="utf-8")
+        return actions.ActionResult("Расчётка по файлу «позиции-из-чата.md» готова.")
+
+    monkeypatch.setattr(actions, "duct_calc", fake_duct_calc)
+    result = actions.duct_calc_text(
+        text="Шибер 160 — 2 шт",
+        connection_label="Фланец",
+        duct_calc_dir=tmp_path,
+        base_url="u",
+        api_key="sk-test",
+        model="m",
+    )
+    assert captured == {"name": "позиции-из-чата.md", "text": "Шибер 160 — 2 шт\n"}
+    assert result.text.startswith("Расчётка по тексту из чата")
+
+
 def test_harness_keeps_prototype_meter_cutting_q37(tmp_path, monkeypatch):
     """Q37 (а): метраж режет сам прототип — 1500 мм и остаток; Харнес не подменяет его нарезку."""
 

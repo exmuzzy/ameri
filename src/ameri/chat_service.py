@@ -70,11 +70,7 @@ def run_action(
     try:
         if action == ACTION_DUCT:
             specs = [a for a in message.attachments if a.path.suffix.lower() in actions.DUCT_SUFFIXES]
-            if not specs:
-                result = actions.ActionResult(
-                    "Для расчётки приложите файл спецификации: .md, .xlsx, .docx, .doc, .odt или .csv."
-                )
-            else:
+            if specs:
                 result = actions.duct_calc(
                     spec=specs[0],
                     connection_label=connection or "Без соединения",
@@ -83,6 +79,21 @@ def run_action(
                     api_key=settings.api_key(),
                     model=settings.deepseek_model,
                     harness_dir=settings.harness_dir,
+                )
+            elif message.content.strip() and message.content.strip() != "(файлы)":
+                result = actions.duct_calc_text(
+                    text=message.content,
+                    connection_label=connection or "Без соединения",
+                    duct_calc_dir=settings.duct_calc_dir,
+                    base_url=settings.deepseek_base_url,
+                    api_key=settings.api_key(),
+                    model=settings.deepseek_model,
+                    harness_dir=settings.harness_dir,
+                )
+            else:
+                result = actions.ActionResult(
+                    "Для расчётки приложите файл спецификации (.md, .xlsx, .docx, .doc, .odt, .csv) "
+                    "или напишите список позиций в сообщении."
                 )
         else:
             llm = DeepSeekChat(
