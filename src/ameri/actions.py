@@ -559,10 +559,30 @@ def names_socket_connection(source_text: str) -> bool:
     return "муфт" in (source_text or "").lower().replace("ё", "е")
 
 
-def _install_coupling_as_socket(pipeline) -> None:
-    """Муфта считается одним раструбом; «муфтовое» на другом изделии ставит раструб на торцы.
+# «Без соединения» и близкие формулировки на самой позиции. Код «_/_» — то же у СМП.
+_NO_CONNECTION_RE = re.compile(
+    r"без\s+соединен"
+    r"|без\s+соединител"
+    r"|соединен\w*\s+отсутств"
+    r"|соединен\w*\s+не\s+(?:требуется|предусмотр)"
+    r"|без\s+фланц\w*(?:\s+и\s+|\s*/\s*)без\s+раструб"
+    r"|без\s+раструб\w*(?:\s+и\s+|\s*/\s*)без\s+фланц"
+    r"|_/_",
+    re.IGNORECASE,
+)
 
-    Прототип на сервере не меняется: слова ищутся здесь, поверх его разбора ниппеля.
+
+def names_no_connection(source_text: str) -> bool:
+    """Позиция сама помечена как изделие без фланца и без раструба."""
+
+    return _NO_CONNECTION_RE.search((source_text or "").replace("ё", "е")) is not None
+
+
+def _install_coupling_as_socket(pipeline) -> None:
+    """Муфта — один раструб. «Без соединения» на строке гасит и фланец, и раструб.
+
+    Прототип на сервере не меняется: слова ищутся здесь. Выбор в окне чата
+    не перекрывает пометку на конкретной позиции.
     """
 
     if hasattr(pipeline, "_is_nipple_text"):
@@ -581,11 +601,29 @@ def _install_coupling_as_socket(pipeline) -> None:
         pipeline._ameri_original_global_connection = original_global
 
         def with_global_connection(position, connection_type):
-            if names_socket_connection(getattr(position, "source_text", "") or ""):
+            text = getattr(position, "source_text", "") or ""
+            if names_no_connection(text):
+                connection_type = "none"
+            elif names_socket_connection(text):
                 connection_type = "socket"
             return original_global(position, connection_type)
 
         pipeline.with_global_connection = with_global_connection
+
+    if hasattr(pipeline, "position_to_output_row"):
+        original_row = (
+            getattr(pipeline, "_ameri_original_position_to_output_row", None) or pipeline.position_to_output_row
+        )
+        pipeline._ameri_original_position_to_output_row = original_row
+
+        def position_to_output_row(position, coefficients, *args, system=None, connection_type=None, **kwargs):
+            if names_no_connection(getattr(position, "source_text", "") or ""):
+                connection_type = "none"
+            return original_row(
+                position, coefficients, *args, system=system, connection_type=connection_type, **kwargs
+            )
+
+        pipeline.position_to_output_row = position_to_output_row
 
 
 # --- Решения руководителя, которых ещё нет в коде прототипа (docs/decisions.md) ---
