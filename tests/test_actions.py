@@ -472,6 +472,16 @@ def test_duct_calc_text_wraps_chat_message(monkeypatch, tmp_path):
     assert result.text.startswith("Расчётка по тексту из чата")
 
 
+def test_line_without_connection_is_not_overridden_by_chat_choice():
+    plain = "Отвод 90 круглый без соединения из полипропилена СМП-ППС-_/_-О90-400"
+    assert actions.names_no_connection(plain)
+    assert actions.names_no_connection("Переход ПП ф200, соединение отсутствует")
+    assert actions.names_no_connection("Воздуховод ф250, соединение не требуется")
+    assert actions.names_no_connection("Отвод ф200 без фланцев и без раструбов")
+    assert not actions.names_no_connection("Отвод 90 ПП ф400 муфтовое соединение")
+    assert not actions.names_no_connection("Воздуховод круглый из полипропилена ф 355 L-2000 мм")
+
+
 def test_coupling_wording_is_socket_not_a_separate_product():
     assert actions.is_coupling_item("Муфта из полипропилена СМП-ППС-М-355")
     assert actions.is_coupling_item("Муфта соединительная для круглых воздуховодов полипропиленовая 315")
@@ -509,6 +519,8 @@ def test_install_counts_coupling_as_one_socket(tmp_path, monkeypatch):
     pipeline.with_global_connection(SimpleNamespace(source_text="Отвод 90 ПП ф400 муфтовое соединение"), "none")
     assert seen["connection"] == "socket"
     pipeline.with_global_connection(SimpleNamespace(source_text="Отвод 90 круглый без соединения"), "flange")
+    assert seen["connection"] == "none"
+    pipeline.with_global_connection(SimpleNamespace(source_text="Воздуховод ф400"), "flange")
     assert seen["connection"] == "flange"
     for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
         del sys.modules[name]
