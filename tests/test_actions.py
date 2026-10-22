@@ -472,6 +472,48 @@ def test_duct_calc_text_wraps_chat_message(monkeypatch, tmp_path):
     assert result.text.startswith("Расчётка по тексту из чата")
 
 
+def test_coupling_wording_is_socket_not_a_separate_product():
+    assert actions.is_coupling_item("Муфта из полипропилена СМП-ППС-М-355")
+    assert actions.is_coupling_item("Муфта соединительная для круглых воздуховодов полипропиленовая 315")
+    assert not actions.is_coupling_item("Отвод 90 круглый без соединения из полипропилена СМП-ППС-_/_-О90-400")
+    assert not actions.is_coupling_item("Воздуховод круглый из полипропилена ф 355 муфтовое соединение L-2000")
+    assert actions.names_socket_connection("Отвод 90 ПП ф400 муфтовое соединение")
+    assert not actions.names_socket_connection("Отвод 90 круглый без соединения из полипропилена")
+
+
+def test_install_counts_coupling_as_one_socket(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+        monkeypatch.delitem(sys.modules, name)
+    proto = fake_prototype(tmp_path, "не важно")
+    monkeypatch.setattr(sys, "path", [str(proto / "src"), *sys.path])
+    from duct_calc import pipeline
+
+    seen = {}
+
+    def original_nipple(text):
+        return "ниппел" in text.lower()
+
+    def original_global(position, connection_type):
+        seen["connection"] = connection_type
+        return position
+
+    pipeline._is_nipple_text = original_nipple
+    pipeline.with_global_connection = original_global
+    actions._install_harness(None)
+    assert pipeline._is_nipple_text("Муфта из полипропилена СМП-ППС-М-355")
+    assert pipeline._is_nipple_text("ниппель 400")
+    assert not pipeline._is_nipple_text("Отвод 90 круглый без соединения")
+    pipeline.with_global_connection(SimpleNamespace(source_text="Отвод 90 ПП ф400 муфтовое соединение"), "none")
+    assert seen["connection"] == "socket"
+    pipeline.with_global_connection(SimpleNamespace(source_text="Отвод 90 круглый без соединения"), "flange")
+    assert seen["connection"] == "flange"
+    for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+        del sys.modules[name]
+
+
 def test_harness_keeps_prototype_meter_cutting_q37(tmp_path, monkeypatch):
     """Q37 (а): метраж режет сам прототип — 1500 мм и остаток; Харнес не подменяет его нарезку."""
 
