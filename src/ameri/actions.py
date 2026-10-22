@@ -526,6 +526,105 @@ _KEYWORD_LISTS = {
     "valve_keywords": "VALVE_KEYWORDS",
 }
 
+# Название изделия — текст до первого размера. «Муфта … М-355» — само изделие.
+# «муфтовое» в хвосте отвода или воздуховода — тип соединения, не отдельная муфта.
+_ITEM_HEAD_RE = re.compile(r"^\s*(?:\d+[.)]\s*)?([^\d]*)")
+_COUPLING_START_RE = re.compile(r"муфт(?!ов)", re.IGNORECASE)
+_COUPLING_RE = re.compile(r"(^|[\s,(])муфт(?!ов)", re.IGNORECASE)
+_OTHER_PRODUCT_RE = re.compile(
+    r"воздуховод|прямик|отвод|тройник|переход|зонт|колено|заглуш|шибер|клапан|реш[её]т|врезк|утк|дефлектор|шумоглуш",
+    re.IGNORECASE,
+)
+
+
+def is_coupling_item(source_text: str) -> bool:
+    """Строка сама называется муфтой: одно раструбное соединение, как ниппель.
+
+    «Муфта … для воздуховодов» остаётся муфтой. «Воздуховод … муфтовое» — нет:
+    там муфта только тип соединения другого изделия.
+    """
+
+    head = _ITEM_HEAD_RE.match(source_text or "")
+    text = (head.group(1) if head else "").replace("ё", "е").strip()
+    if _COUPLING_START_RE.match(text):
+        return True
+    if _OTHER_PRODUCT_RE.search(text):
+        return False
+    return _COUPLING_RE.search(text) is not None
+
+
+def names_socket_connection(source_text: str) -> bool:
+    """«Муфта» и «муфтовое соединение» — то же, что раструб."""
+
+    return "муфт" in (source_text or "").lower().replace("ё", "е")
+
+
+# «Без соединения» и близкие формулировки на самой позиции. Код «_/_» — то же у СМП.
+_NO_CONNECTION_RE = re.compile(
+    r"без\s+соединен"
+    r"|без\s+соединител"
+    r"|соединен\w*\s+отсутств"
+    r"|соединен\w*\s+не\s+(?:требуется|предусмотр)"
+    r"|без\s+фланц\w*(?:\s+и\s+|\s*/\s*)без\s+раструб"
+    r"|без\s+раструб\w*(?:\s+и\s+|\s*/\s*)без\s+фланц"
+    r"|_/_",
+    re.IGNORECASE,
+)
+
+
+def names_no_connection(source_text: str) -> bool:
+    """Позиция сама помечена как изделие без фланца и без раструба."""
+
+    return _NO_CONNECTION_RE.search((source_text or "").replace("ё", "е")) is not None
+
+
+def _install_coupling_as_socket(pipeline) -> None:
+    """Муфта — один раструб. «Без соединения» на строке гасит и фланец, и раструб.
+
+    Прототип на сервере не меняется: слова ищутся здесь. Выбор в окне чата
+    не перекрывает пометку на конкретной позиции.
+    """
+
+    if hasattr(pipeline, "_is_nipple_text"):
+        original = getattr(pipeline, "_ameri_original_is_nipple_text", None) or pipeline._is_nipple_text
+        pipeline._ameri_original_is_nipple_text = original
+
+        def _is_nipple_text(source_text: str) -> bool:
+            return original(source_text) or is_coupling_item(source_text)
+
+        pipeline._is_nipple_text = _is_nipple_text
+
+    if hasattr(pipeline, "with_global_connection"):
+        original_global = (
+            getattr(pipeline, "_ameri_original_global_connection", None) or pipeline.with_global_connection
+        )
+        pipeline._ameri_original_global_connection = original_global
+
+        def with_global_connection(position, connection_type):
+            text = getattr(position, "source_text", "") or ""
+            if names_no_connection(text):
+                connection_type = "none"
+            elif names_socket_connection(text):
+                connection_type = "socket"
+            return original_global(position, connection_type)
+
+        pipeline.with_global_connection = with_global_connection
+
+    if hasattr(pipeline, "position_to_output_row"):
+        original_row = (
+            getattr(pipeline, "_ameri_original_position_to_output_row", None) or pipeline.position_to_output_row
+        )
+        pipeline._ameri_original_position_to_output_row = original_row
+
+        def position_to_output_row(position, coefficients, *args, system=None, connection_type=None, **kwargs):
+            if names_no_connection(getattr(position, "source_text", "") or ""):
+                connection_type = "none"
+            return original_row(
+                position, coefficients, *args, system=system, connection_type=connection_type, **kwargs
+            )
+
+        pipeline.position_to_output_row = position_to_output_row
+
 
 # --- Решения руководителя, которых ещё нет в коде прототипа (docs/decisions.md) ---
 # Подключаются обёрткой, как правила Харнеса: прототип на сервере не меняется. Если такое же
@@ -677,6 +776,7 @@ def _install_harness(harness_dir: Path | None) -> None:
     from duct_calc import pipeline
 
     _install_decisions(pipeline)
+    _install_coupling_as_socket(pipeline)
 
     original = getattr(pipeline, "_ameri_original_prompt", None) or pipeline.build_system_prompt
     pipeline._ameri_original_prompt = original
