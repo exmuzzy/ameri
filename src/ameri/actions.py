@@ -657,6 +657,10 @@ def lone_connection_kind(source_text: str) -> str | None:
 def stated_piece_quantity(qty: object, source_text: str) -> float:
     """Количество штук из поля позиции, иначе из «N шт» в строке, иначе 1."""
 
+    if isinstance(qty, str):
+        text = qty.strip().replace(",", ".")
+        if re.fullmatch(r"\d+(?:\.\d+)?", text):
+            qty = float(text)
     if isinstance(qty, (int, float)) and not isinstance(qty, bool) and qty >= 1:
         return float(qty)
     piece = _PIECE_QTY_RE.search(_plain_item_text(source_text))
@@ -736,6 +740,8 @@ def lone_connection_output_row(position, kind: str, section: tuple[str, tuple[fl
         l=None,
         m=None,
         connection_cost=connection_unit_cost(kind, shape, dimensions),
+        # Флаг гасит тело изделия (толщина, площадь, L и M). Цена соединения
+        # пишется в колонку P и входит в итог строки (N+P).
         purchased=True,
     )
 
