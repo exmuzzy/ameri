@@ -9,7 +9,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 import yaml
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, is_dataclass, replace
 from pathlib import Path
 
 from .llm import DeepSeekChat, key_problem
@@ -578,6 +578,190 @@ def names_no_connection(source_text: str) -> bool:
     return _NO_CONNECTION_RE.search((source_text or "").replace("ё", "е")) is not None
 
 
+def _plain_item_text(source_text: str) -> str:
+    return (source_text or "").replace("ё", "е").replace("\u00a0", " ").replace("\u202f", " ")
+
+
+# «ХИМВЕНТ» само по себе — без формулы. Рядом с названием элемента строка считается.
+_HIMVENT_DUCT_RE = re.compile(
+    r"воздуховод|прям\w*\s+участ|прямик|отвод|колен|переход|тройник|заглуш|утк|зонт|дефлектор",
+    re.IGNORECASE,
+)
+_LONE_CONNECTION_FILLER = frozenset(
+    {
+        "пп",
+        "полипропилен",
+        "полипропиленовый",
+        "полипропиленовая",
+        "полипропиленовое",
+        "круглый",
+        "круглая",
+        "круглое",
+        "прямоугольный",
+        "прямоугольная",
+        "прямоугольное",
+        "плоский",
+        "плоская",
+        "плоское",
+        "из",
+        "d",
+        "ф",
+        "д",
+    }
+)
+_FLANGE_WORDS = frozenset({"фланец", "фланцы"})
+_SOCKET_WORDS = frozenset({"раструб", "раструбы"})
+# «фланец 20» и «ф20» — не диаметр 20 мм. «фланец 200» сюда не попадает.
+_FLANGE_20_RE = re.compile(
+    r"(?:фланец|фланц\w*)(?:\s*|-)?20(?!\d)|\bф\s*20(?!\d)",
+    re.IGNORECASE,
+)
+_PIECE_QTY_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*шт\.?", re.IGNORECASE)
+_LONE_RECT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*[xх×]\s*(\d+(?:[.,]\d+)?)", re.IGNORECASE)
+_LONE_MARKED_ROUND_RE = re.compile(r"(?:д|ø|⌀|∅)\s*(\d+(?:[.,]\d+)?)", re.IGNORECASE)
+_SYSTEM_MARK_RE = re.compile(r"\bсистема\s+([^,\n;]+)", re.IGNORECASE)
+
+
+def is_himvent_duct(source_text: str) -> bool:
+    """«ХИМВЕНТ» в строке, где назван считаемый элемент воздуховода.
+
+    Голый код «ХИМВЕНТ-…» и вентилятор с этой маркой сюда не входят.
+    """
+
+    text = _plain_item_text(source_text).lower()
+    return "химвент" in text and _HIMVENT_DUCT_RE.search(text) is not None
+
+
+def lone_connection_kind(source_text: str) -> str | None:
+    """Строка сама называется фланцем или раструбом и задаёт размер.
+
+    «Отвод … фланец» — изделие с соединением на хвосте. «фланец 20» — не диаметр.
+    """
+
+    text = _plain_item_text(source_text)
+    if _FLANGE_20_RE.search(text):
+        return None
+    head_match = _ITEM_HEAD_RE.match(text)
+    head = (head_match.group(1) if head_match else "").lower().replace("ё", "е")
+    words = re.findall(r"[a-zа-я]+", head)
+    core = [word for word in words if word not in _LONE_CONNECTION_FILLER]
+    if len(core) != 1:
+        return None
+    if core[0] in _FLANGE_WORDS:
+        return "flange"
+    if core[0] in _SOCKET_WORDS:
+        return "socket"
+    return None
+
+
+def stated_piece_quantity(qty: object, source_text: str) -> float:
+    """Количество штук из поля позиции, иначе из «N шт» в строке, иначе 1."""
+
+    if isinstance(qty, (int, float)) and not isinstance(qty, bool) and qty >= 1:
+        return float(qty)
+    piece = _PIECE_QTY_RE.search(_plain_item_text(source_text))
+    if piece is not None:
+        return float(piece.group(1).replace(",", "."))
+    return 1.0
+
+
+def lone_connection_section(source_text: str) -> tuple[str, tuple[float, ...]] | None:
+    """Сечение отдельного фланца или раструба: прямоугольник либо одно число-диаметр.
+
+    Число перед «шт» — количество, не диаметр.
+    """
+
+    text = _plain_item_text(source_text)
+    rect = _LONE_RECT_RE.search(text)
+    if rect is not None:
+        return (
+            "rect",
+            (float(rect.group(1).replace(",", ".")), float(rect.group(2).replace(",", "."))),
+        )
+    marked = _LONE_MARKED_ROUND_RE.search(text)
+    if marked is not None:
+        return ("round", (float(marked.group(1).replace(",", ".")),))
+    piece = _PIECE_QTY_RE.search(text)
+    qty_span = piece.span(1) if piece is not None else None
+    numbers: list[float] = []
+    for match in re.finditer(r"\d+(?:[.,]\d+)?", text):
+        if qty_span is not None and match.span() == qty_span:
+            continue
+        numbers.append(float(match.group(0).replace(",", ".")))
+    if len(numbers) == 1:
+        return ("round", (numbers[0],))
+    return None
+
+
+def _system_label_from_text(text: str) -> str | None:
+    match = _SYSTEM_MARK_RE.search(text or "")
+    if match is None:
+        return None
+    label = re.sub(r"\s+", " ", match.group(1)).strip(" .,:;")
+    return label or None
+
+
+def connection_unit_cost(kind: str, shape: str, dimensions: tuple[float, ...]):
+    """Цена одного соединения. Считает прототип, свою цену сюда не пишем."""
+
+    from duct_calc.flanges import ConnectionEnd, connection_cost
+
+    if shape == "round":
+        end = ConnectionEnd.round(dimensions[0], kind)
+    else:
+        end = ConnectionEnd.rect(dimensions[0], dimensions[1], kind)
+    return connection_cost((end,))
+
+
+def _output_row(**kwargs):
+    from duct_calc.xlsx_out import OutputRow
+
+    return OutputRow(**kwargs)
+
+
+def lone_connection_output_row(position, kind: str, section: tuple[str, tuple[float, ...]], *, system: str | None):
+    """Строка расчётки: площади тела нет, в соединении — цена одного фланца или раструба."""
+
+    shape, dimensions = section
+    text = getattr(position, "source_text", "") or ""
+    row_system = system if system is not None else _system_label_from_text(text)
+    source_no = getattr(position, "source_no", "")
+    return _output_row(
+        system=row_system,
+        nomenclature=text.strip() or f"Позиция {source_no}",
+        length_mm=None,
+        quantity=stated_piece_quantity(getattr(position, "qty", None), text),
+        thickness_mm=None,
+        area_m2=None,
+        l=None,
+        m=None,
+        connection_cost=connection_unit_cost(kind, shape, dimensions),
+        purchased=True,
+    )
+
+
+def as_lone_connection(position):
+    """Снять вопросы о типе и записать количество, чтобы файл с одним фланцем собрался."""
+
+    text = getattr(position, "source_text", "") or ""
+    if lone_connection_kind(text) is None:
+        return position
+    section = lone_connection_section(text)
+    if section is None or not is_dataclass(position):
+        return position
+    shape, dimensions = section
+    size = {"d": dimensions[0]} if shape == "round" else {"a": dimensions[0], "b": dimensions[1]}
+    return replace(
+        position,
+        element_type=None,
+        size=size,
+        length_mm=None,
+        ends=(),
+        questions=(),
+        qty=stated_piece_quantity(getattr(position, "qty", None), text),
+    )
+
+
 def _install_coupling_as_socket(pipeline) -> None:
     """Муфта — один раструб. «Без соединения» на строке гасит и фланец, и раструб.
 
@@ -617,7 +801,14 @@ def _install_coupling_as_socket(pipeline) -> None:
         pipeline._ameri_original_position_to_output_row = original_row
 
         def position_to_output_row(position, coefficients, *args, system=None, connection_type=None, **kwargs):
-            if names_no_connection(getattr(position, "source_text", "") or ""):
+            text = getattr(position, "source_text", "") or ""
+            kind = lone_connection_kind(text)
+            if kind is not None:
+                section = lone_connection_section(text)
+                if section is not None:
+                    # Тип соединения берётся из строки. Выбор на весь файл эту строку не перебивает.
+                    return lone_connection_output_row(position, kind, section, system=system)
+            if names_no_connection(text):
                 connection_type = "none"
             return original_row(
                 position, coefficients, *args, system=system, connection_type=connection_type, **kwargs
@@ -688,7 +879,7 @@ def preview_without_headings(preview, compare_completeness):
     headings = [
         item
         for item in preview.positions
-        if item.position is not None and is_section_heading(item.source_text, item.position)
+        if getattr(item, "position", None) is not None and is_section_heading(item.source_text, item.position)
     ]
     if not headings:
         return preview
@@ -753,6 +944,42 @@ def manager_warning(text: str) -> str:
     return f"{what} для «{category}» взят по умолчанию: в шаблоне расчётки вместо числа текст."
 
 
+def _install_catalog_line_rules(pipeline) -> None:
+    """ХИМВЕНТ на элементе считается. Отдельный фланец или раструб не остаётся красной строкой.
+
+    Прототип на сервере не меняется. Если он уже умеет то же самое, повтор ничего не добавляет:
+    покупное слово снимается один раз, строка соединения пишется один раз.
+    """
+
+    if hasattr(pipeline, "_is_scrubber_text"):
+        original_scrubber = (
+            getattr(pipeline, "_ameri_original_is_scrubber_text", None) or pipeline._is_scrubber_text
+        )
+        pipeline._ameri_original_is_scrubber_text = original_scrubber
+
+        def _is_scrubber_text(source_text: str) -> bool:
+            if is_himvent_duct(source_text):
+                lower = _plain_item_text(source_text).lower()
+                keywords = tuple(
+                    word for word in getattr(pipeline, "PASSTHROUGH_ITEM_KEYWORDS", ()) if word != "химвент"
+                )
+                return any(keyword in lower for keyword in keywords)
+            return original_scrubber(source_text)
+
+        pipeline._is_scrubber_text = _is_scrubber_text
+
+    if hasattr(pipeline, "with_special_catalog_rules"):
+        original_rules = (
+            getattr(pipeline, "_ameri_original_special_catalog", None) or pipeline.with_special_catalog_rules
+        )
+        pipeline._ameri_original_special_catalog = original_rules
+
+        def with_special_catalog_rules(position):
+            return original_rules(as_lone_connection(position))
+
+        pipeline.with_special_catalog_rules = with_special_catalog_rules
+
+
 def _install_decisions(pipeline) -> None:
     """Q38 и Q39 поверх прототипа: оборачиваем его функции, исходные сохраняем для повторной установки.
 
@@ -771,12 +998,17 @@ def _install_decisions(pipeline) -> None:
 
 
 def _install_harness(harness_dir: Path | None) -> None:
-    """Подключить Харнес к прототипу duct-calc: правила разбора, ключевые слова, решения Q38 и Q39."""
+    """Подключить Харнес к прототипу duct-calc: правила разбора, ключевые слова, решения Q38 и Q39.
+
+    Поверх прототипа: ХИМВЕНТ на названном элементе считается, отдельный фланец или раструб
+    попадает в стоимость соединения.
+    """
 
     from duct_calc import pipeline
 
     _install_decisions(pipeline)
     _install_coupling_as_socket(pipeline)
+    _install_catalog_line_rules(pipeline)
 
     original = getattr(pipeline, "_ameri_original_prompt", None) or pipeline.build_system_prompt
     pipeline._ameri_original_prompt = original
