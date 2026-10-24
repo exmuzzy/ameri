@@ -600,3 +600,139 @@ def test_manager_message_drops_model_warnings_keeps_code_ones():
         "Раскрой нестандартных изделий (зонты, клапаны, шумоглушители) — 1,5 (в шаблоне «от 1,5, уточнять»)."
     )
     assert actions.manager_warning(code) == code
+
+
+def test_himvent_and_lone_connection_are_read_from_the_line():
+    """ХИМВЕНТ на названном элементе считается. Отдельный фланец берёт размер и количество из строки."""
+
+    assert actions.is_himvent_duct("Воздуховод аналог ХИМВЕНТ ø250 L1500")
+    assert actions.is_himvent_duct("Отвод 90-ПП-110-3-ММ ХИМВЕНТ")
+    assert actions.is_himvent_duct("Переход ХИМВЕНТ-ПП-250/200-3-ММ")
+    assert actions.is_himvent_duct("Прямой участок ХИМВЕНТ ф250")
+    assert not actions.is_himvent_duct("ХИМВЕНТ-Н-О-1130-ПП-БС-У2-30/1000-ПО")
+    assert not actions.is_himvent_duct("Вентилятор ХИМВЕНТ-Н-К-О-225")
+    assert not actions.is_himvent_duct("Скруббер ХИМВЕНТ")
+
+    assert actions.lone_connection_kind("фланец 355") == "flange"
+    assert actions.lone_connection_kind("фланцы 355 — 4 шт") == "flange"
+    assert actions.lone_connection_kind("фланец ПП 600х300") == "flange"
+    assert actions.lone_connection_kind("фланец 200") == "flange"
+    assert actions.lone_connection_kind("раструб 315") == "socket"
+    assert actions.lone_connection_kind("фланец 20") is None
+    assert actions.lone_connection_kind("ф20") is None
+    assert actions.lone_connection_kind("Отвод 90 ф315 фланец") is None
+
+    assert actions.lone_connection_section("фланец 355") == ("round", (355.0,))
+    assert actions.lone_connection_section("фланец 355 — 4 шт") == ("round", (355.0,))
+    assert actions.lone_connection_section("фланец ПП 600х300") == ("rect", (600.0, 300.0))
+    assert actions.stated_piece_quantity(None, "фланец 355") == 1
+    assert actions.stated_piece_quantity(None, "фланец 355 — 4 шт") == 4
+    assert actions.stated_piece_quantity(4, "фланец 355") == 4
+
+
+def test_install_prices_lone_connection_and_keeps_named_himvent(tmp_path, monkeypatch):
+    """Обёртка поверх старого прототипа: воздуховод с ХИМВЕНТ не покупной, фланец 355 — одно соединение."""
+
+    import sys
+
+    for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+        monkeypatch.delitem(sys.modules, name)
+    proto = fake_prototype(tmp_path, "не важно")
+    monkeypatch.setattr(sys, "path", [str(proto / "src"), *sys.path])
+    from duct_calc import pipeline
+
+    pipeline.PASSTHROUGH_ITEM_KEYWORDS = ("скруббер", "химвент", "вентилятор")
+
+    def old_scrubber(source_text: str) -> bool:
+        lower = source_text.lower().replace("ё", "е")
+        return any(word in lower for word in pipeline.PASSTHROUGH_ITEM_KEYWORDS)
+
+    def old_rules(position):
+        return position
+
+    def old_row(position, coefficients, *args, system=None, connection_type=None, **kwargs):
+        return _NS(passthrough=True, connection_type=connection_type, text=position.source_text)
+
+    pipeline._is_scrubber_text = old_scrubber
+    pipeline.with_special_catalog_rules = old_rules
+    pipeline.position_to_output_row = old_row
+
+    calls = []
+
+    def fake_cost(kind, shape, dimensions):
+        calls.append((kind, shape, dimensions))
+        return "one"
+
+    monkeypatch.setattr(actions, "connection_unit_cost", fake_cost)
+    monkeypatch.setattr(actions, "_output_row", lambda **kwargs: _NS(**kwargs))
+    actions._install_harness(None)
+    actions._install_harness(None)
+
+    assert not pipeline._is_scrubber_text("Воздуховод аналог ХИМВЕНТ ø250 L1500")
+    assert not pipeline._is_scrubber_text("Отвод 90-ПП-110-3-ММ ХИМВЕНТ")
+    assert pipeline._is_scrubber_text("ХИМВЕНТ-Н-О-1130-ПП-БС-У2-30/1000-ПО")
+    assert pipeline._is_scrubber_text("Вентилятор ХИМВЕНТ-Н-К-О-225")
+    assert pipeline._is_scrubber_text("Скруббер ХИМВЕНТ")
+    assert pipeline._is_scrubber_text("Воздуховод скруббер ХИМВЕНТ ф250")
+
+    @_dc(frozen=True)
+    class Position:
+        source_no: str
+        source_text: str
+        element_type: str | None
+        qty: float | None
+        length_mm: float | None
+        size: dict
+        ends: tuple
+        questions: tuple
+
+    def position(text, **kwargs):
+        data = dict(
+            source_no="1",
+            source_text=text,
+            element_type=None,
+            qty=None,
+            length_mm=None,
+            size={},
+            ends=(),
+            questions=(("unknown_type", "Тип не распознан"),),
+        )
+        data.update(kwargs)
+        return Position(**data)
+
+    ready = pipeline.with_special_catalog_rules(position("фланец 355"))
+    assert ready.questions == ()
+    assert ready.qty == 1
+    assert ready.element_type is None
+    assert ready.size == {"d": 355.0}
+    elbow = position("Отвод 90 ф315 фланец", element_type="elbow_round", qty=1, questions=(("keep", "остаётся"),))
+    assert pipeline.with_special_catalog_rules(elbow) is elbow
+
+    one = pipeline.position_to_output_row(position("фланец 355"), None, connection_type="socket")
+    assert one.purchased is True
+    assert one.area_m2 is None
+    assert one.quantity == 1
+    assert one.connection_cost == "one"
+    assert calls == [("flange", "round", (355.0,))]
+
+    four = pipeline.position_to_output_row(position("фланец 355 — 4 шт"), None, connection_type="none")
+    assert four.quantity == 4
+    assert calls == [("flange", "round", (355.0,)), ("flange", "round", (355.0,))]
+
+    socket = pipeline.position_to_output_row(position("раструб 315"), None, connection_type="flange")
+    assert socket.quantity == 1
+    assert calls[-1] == ("socket", "round", (315.0,))
+
+    rect = pipeline.position_to_output_row(position("фланец ПП 600х300"), None, connection_type="socket")
+    assert rect.quantity == 1
+    assert calls[-1] == ("flange", "rect", (600.0, 300.0))
+
+    before = len(calls)
+    assert pipeline.position_to_output_row(position("фланец 20"), None, connection_type="flange").passthrough is True
+    assert pipeline.position_to_output_row(
+        position("Отвод 90 ф315 фланец", element_type="elbow_round", qty=1), None, connection_type="socket"
+    ).passthrough is True
+    assert len(calls) == before
+
+    for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+        del sys.modules[name]
