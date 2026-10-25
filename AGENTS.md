@@ -7,7 +7,8 @@
 **ameri** — сайт на Streamlit для менеджеров по полипропиленовым воздуховодам: чаты с ассистентом на DeepSeek, расчётка воздуховодов (XLSX) через прототип duct-calc, руководитель оценивает и исправляет ответы, из исправлений растёт **харнес** (`harness/`) в git.
 
 - Прод: https://159-194-254-146.sslip.io — VPS Beget `ameri`, `ssh root@159.194.254.146` (только по ключу).
-- Ветка: `master` (единственная рабочая; сервер собирается из неё).
+- Ветка: `master` (единственная рабочая; сервер собирается из `exmuzzy/ameri`).
+- Коммиты агента — только в `master` форка https://github.com/igorcursor375-sudo/ameri (`git push fork master`). Pull request, merge в `exmuzzy/ameri` и обновление сайта делает пользователь, не агент.
 - Язык интерфейса, статей, харнеса, docstring-ов и комментариев — русский. Сообщения коммитов — английский, повелительное наклонение.
 
 ## Главные инварианты
@@ -78,7 +79,7 @@ DEEPSEEK_API_KEY=... AMERI_DUCT_CALC_DIR=/путь/к/duct-calc python tools/run
 - **Новый запрос API** — в `src/ameri/api.py` только поверх функций ядра (`chat_service`, `users_service`, `Store`), права — `Access.can`; тест в `tests/test_api.py`. Эндпоинтов для утверждения харнеса и ключа DeepSeek не добавляем.
 - **Работа на рабочем сайте из облачной сессии** — браузер не подойдёт (прокси не пропускает WebSocket Streamlit); используйте API, пример — `tools/demo_via_api.py`.
 - **Новая колонка в базе** — добавь в `SCHEMA` (с `DEFAULT`, если NOT NULL), миграция применится сама; тест на старую базу — по образцу `test_migration_adds_new_columns_and_keeps_data`.
-- **Выкатить** — push в `master`, затем на сайте «Обновить сайт» или `POST /api/v1/update` (`tools/demo_via_api.py --update-site`) (или `ssh root@159.194.254.146 /srv/ameri/app/deploy/autoupdate.sh`). Харнес и `docs/` — без перезапуска; код — пересборка с копией базы.
+- **Выкатить** — `git push fork master` (https://github.com/igorcursor375-sudo/ameri). Pull request и merge в `exmuzzy/ameri` делает пользователь. После его merge сайт обновляется кнопкой «Обновить сайт», `POST /api/v1/update` или `ssh root@159.194.254.146 /srv/ameri/app/deploy/autoupdate.sh`. Харнес и `docs/` — без перезапуска; код — пересборка с копией базы. Агент сам сайт не обновляет.
 
 ## Сервер (VPS Beget)
 
