@@ -1,0 +1,12 @@
+---
+description: Коммиты только в master форка igorcursor375-sudo/ameri; pull request и merge делает пользователь
+alwaysApply: true
+---
+
+# Куда отправлять коммиты
+
+Проверенные изменения репозитория отправляй только в ветку `master` репозитория https://github.com/igorcursor375-sudo/ameri (`git push fork master`).
+
+Перед отправкой прогони `python -m pytest -q`.
+
+Не пушь в `origin` (`https://github.com/exmuzzy/ameri.git`). Не создавай pull request, не мержи и не обновляй рабочий сайт. Это делает пользователь.

@@ -628,6 +628,9 @@ def test_himvent_and_lone_connection_are_read_from_the_line():
     assert actions.stated_piece_quantity(None, "фланец 355") == 1
     assert actions.stated_piece_quantity(None, "фланец 355 — 4 шт") == 4
     assert actions.stated_piece_quantity(4, "фланец 355") == 4
+    assert actions.stated_piece_quantity("4", "фланец 355") == 4
+    assert actions.stated_piece_quantity("4", "фланец 355 — 2 шт") == 4
+    assert actions.stated_piece_quantity("нет", "фланец 355 — 4 шт") == 4
 
 
 def test_install_prices_lone_connection_and_keeps_named_himvent(tmp_path, monkeypatch):
@@ -715,9 +718,19 @@ def test_install_prices_lone_connection_and_keeps_named_himvent(tmp_path, monkey
     assert one.connection_cost == "one"
     assert calls == [("flange", "round", (355.0,))]
 
+    from_text_qty = pipeline.position_to_output_row(position("фланец 355", qty="4"), None, connection_type="socket")
+    assert from_text_qty.quantity == 4
+    assert from_text_qty.purchased is True
+    assert from_text_qty.connection_cost == "one"
+    assert calls[-1] == ("flange", "round", (355.0,))
+
     four = pipeline.position_to_output_row(position("фланец 355 — 4 шт"), None, connection_type="none")
     assert four.quantity == 4
-    assert calls == [("flange", "round", (355.0,)), ("flange", "round", (355.0,))]
+    assert calls == [
+        ("flange", "round", (355.0,)),
+        ("flange", "round", (355.0,)),
+        ("flange", "round", (355.0,)),
+    ]
 
     socket = pipeline.position_to_output_row(position("раструб 315"), None, connection_type="flange")
     assert socket.quantity == 1
