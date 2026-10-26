@@ -194,7 +194,8 @@ def _xlsx_items(path: Path) -> list[list[str] | str] | None:
         return None
     items: list[list[str] | str] = []
     try:
-        for sheet in book.worksheets:
+        # Считается только первая вкладка, как в прототипе: остальные — черновики и справки.
+        for sheet in book.worksheets[:1]:
             for row in sheet.iter_rows(values_only=True):
                 cells = ["" if value is None else str(value).strip() for value in row]
                 filled = [cell for cell in cells if cell]
@@ -410,7 +411,7 @@ def _xlsx_rows(path: Path) -> list[list[str]]:
 
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
-        sheet = workbook.active
+        sheet = workbook.worksheets[0]
         return [
             ["" if cell is None else str(cell) for cell in row]
             for row in sheet.iter_rows(max_row=PREVIEW_MAX_ROWS + 1, values_only=True)
@@ -547,6 +548,57 @@ _OTHER_PRODUCT_RE = re.compile(
 )
 
 
+def item_name(source_text: str) -> str:
+    """Название изделия из строки таблицы: без имени листа Excel, номера и количества.
+
+    Прототип пишет строку .xlsx как «Лист1\\t№\\tНазвание\\t…\\tКол-во», строку таблицы
+    Word — «№\\tНазвание\\t…». Название ищется в начале строки, до первой цифры, поэтому
+    с именем листа впереди шибер или фланец не узнаётся. Строка без табуляции не меняется.
+    """
+
+    text = source_text or ""
+    if "\t" not in text:
+        return text
+    fields = [field.strip() for field in text.split("\t")]
+    names = [field for field in fields if _is_nomenclature_field(field)]
+    if not names:
+        return text
+    sheet_first = len(names) > 1 and names[0] == fields[0] and (
+        _DEFAULT_SHEET_RE.fullmatch(fields[0]) or not fields[1] or fields[1].isdigit()
+    )
+    return names[1] if sheet_first else names[0]
+
+
+def item_head(source_text: str) -> str:
+    """Начало названия изделия до первого размера, в нижнем регистре."""
+
+    match = _ITEM_HEAD_RE.match(_plain_item_text(item_name(source_text)))
+    return (match.group(1) if match else "").lower()
+
+
+def flanged_special_kind(source_text: str) -> str | None:
+    """Шибер, обратный клапан и врезка — фланцы у них при любом типе соединения файла.
+
+    Дополнения заказчика к расчёту, пункты 5.1–5.3: шибер — 4 фланца, обратный клапан
+    и врезка — по 2. Узнаём по названию, как прототип: «Зонт … врезка ф315» — не врезка.
+    """
+
+    head = item_head(source_text)
+    if "шибер" in head:
+        return "gate"
+    if "обратн" in head and "клапан" in head:
+        return "reverse_valve"
+    if "врезк" in head:
+        return "tap"
+    return None
+
+
+def _with_source_text(position, text: str):
+    if not is_dataclass(position) or getattr(position, "source_text", None) == text:
+        return position
+    return replace(position, source_text=text)
+
+
 def is_coupling_item(source_text: str) -> bool:
     """Строка сама называется муфтой: одно раструбное соединение, как ниппель.
 
@@ -554,7 +606,7 @@ def is_coupling_item(source_text: str) -> bool:
     там муфта только тип соединения другого изделия.
     """
 
-    head = _ITEM_HEAD_RE.match(source_text or "")
+    head = _ITEM_HEAD_RE.match(item_name(source_text))
     text = (head.group(1) if head else "").replace("ё", "е").strip()
     if _COUPLING_START_RE.match(text):
         return True
@@ -653,7 +705,7 @@ def lone_connection_kind(source_text: str) -> str | None:
     из полипропилена 200х200 мм, толщина …») — тоже отдельный фланец.
     """
 
-    text = _plain_item_text(source_text)
+    text = _plain_item_text(item_name(source_text))
     if _FLANGE_20_RE.search(text):
         return None
     head_match = _ITEM_HEAD_RE.match(text)
@@ -693,7 +745,7 @@ def lone_connection_section(source_text: str) -> tuple[str, tuple[float, ...]] |
     Число перед «шт» — количество, не диаметр.
     """
 
-    text = _plain_item_text(source_text)
+    text = _plain_item_text(item_name(source_text))
     rect = _LONE_RECT_RE.search(text)
     if rect is not None:
         return (
@@ -933,7 +985,12 @@ def _install_coupling_as_socket(pipeline) -> None:
                 if section is not None:
                     # Тип соединения берётся из строки. Выбор на весь файл эту строку не перебивает.
                     return lone_connection_output_row(position, kind, section, system=system)
-            if names_no_connection(text):
+            if flanged_special_kind(text) is not None:
+                # Фланцы шибера, обратного клапана и врезки — часть изделия: ни выбор на весь
+                # файл, ни «без соединения» в строке их не снимают.
+                connection_type = "flange"
+                position = _with_source_text(position, item_name(text))
+            elif names_no_connection(text):
                 connection_type = "none"
             return with_system_column(
                 original_row(
@@ -1073,6 +1130,7 @@ def manager_warning(text: str) -> str:
 
 def _install_catalog_line_rules(pipeline) -> None:
     """ХИМВЕНТ на элементе считается. Отдельный фланец или раструб не остаётся красной строкой.
+    Шибер, клапан и врезка из Excel узнаются по названию, а не по имени листа.
 
     Прототип на сервере не меняется. Если он уже умеет то же самое, повтор ничего не добавляет:
     покупное слово снимается один раз, строка соединения пишется один раз.
@@ -1102,9 +1160,19 @@ def _install_catalog_line_rules(pipeline) -> None:
         pipeline._ameri_original_special_catalog = original_rules
 
         def with_special_catalog_rules(position):
+            text = getattr(position, "source_text", "") or ""
+            if flanged_special_kind(text) is not None:
+                # Сечение — из названия, а не из имени листа и количества.
+                ready = original_rules(_with_source_text(position, item_name(text)))
+                return _with_source_text(ready, text)
             return original_rules(as_lone_connection(position))
 
         pipeline.with_special_catalog_rules = with_special_catalog_rules
+
+    if hasattr(pipeline, "_item_head"):
+        original_head = getattr(pipeline, "_ameri_original_item_head", None) or pipeline._item_head
+        pipeline._ameri_original_item_head = original_head
+        pipeline._item_head = lambda source_text: original_head(item_name(source_text))
 
 
 def _install_decisions(pipeline) -> None:
