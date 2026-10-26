@@ -857,3 +857,105 @@ def test_split_system_nomenclature_moves_sheet_name_out_of_item():
     formula, name = actions.split_system_nomenclature("Лист1\t\t=SUM(G3:G70)\t\t")
     assert formula is None
     assert name == "'=SUM(G3:G70)"
+
+
+def test_item_name_skips_sheet_title_so_gate_and_flange_are_recognized():
+    """Заявка «цниим»: «Лист1\\t\\tШиберная заслонка …» ушла красной строкой «тип не распознан» —
+    название ищется в начале строки, а там было имя листа."""
+
+    assert actions.item_name("Лист1\t\tШиберная заслонка  ПНД ф280 фф\t\t3") == "Шиберная заслонка  ПНД ф280 фф"
+    assert actions.item_name("Спецификация\t1\tВрезка 400/160\tшт\t1") == "Врезка 400/160"
+    assert actions.item_name("1\tШибер 160\tшт\t3") == "Шибер 160"  # строка таблицы Word, без листа
+    assert actions.item_name("Шибер 160 — 3 шт") == "Шибер 160 — 3 шт"
+
+    assert actions.flanged_special_kind("Лист1\t\tШиберная заслонка  ПНД ф280 фф\t\t3") == "gate"
+    assert actions.flanged_special_kind("Обратный клапан ПП ф500 — 1 шт") == "reverse_valve"
+    assert actions.flanged_special_kind("7. Клапан обратный d=200 мм — 1 шт") == "reverse_valve"
+    assert actions.flanged_special_kind("Лист1\t\tВрезка 400/160\t\t1") == "tap"
+    assert actions.flanged_special_kind("Зонт вытяжной ПП 1400х1000 Н300 врезка ф315") is None
+    assert actions.flanged_special_kind("Дроссель-клапан ПП ф250") is None
+    assert actions.flanged_special_kind("Лист1\t\tОтвод 90 гр. ПНД ф280 фф\t\t8") is None
+
+    assert actions.lone_connection_kind("Лист1\t\tФланец 355\t\t4") == "flange"
+    assert actions.lone_connection_section("Лист1\t\tФланец 355\t\t4") == ("round", (355.0,))
+    assert actions.is_coupling_item("Лист1\t\tМуфта соединительная 315\t\t2")
+
+
+def test_install_puts_flanges_on_gate_reverse_valve_and_tap(tmp_path, monkeypatch):
+    """Дополнения 5.1–5.3: у шибера 4 фланца, у обратного клапана и врезки по 2 — при любом
+    типе соединения файла. Сечение прототип берёт из названия, а не из имени листа."""
+
+    import re
+    import sys
+
+    for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+        monkeypatch.delitem(sys.modules, name)
+    proto = fake_prototype(tmp_path, "не важно")
+    monkeypatch.setattr(sys, "path", [str(proto / "src"), *sys.path])
+    from duct_calc import pipeline
+
+    def core_item_head(source_text):  # как в прототипе: начало строки до первой цифры
+        match = re.match(r"^\s*(?:\d+[.)]\s*)?([^\d]*)", source_text)
+        return match.group(1).lower() if match else ""
+
+    seen = []
+
+    def core_rules(position):
+        seen.append(position.source_text)
+        return _Position(position.source_no, position.source_text, size={"d": 280.0})
+
+    def core_row(position, coefficients, *args, system=None, connection_type=None, **kwargs):
+        return _NS(connection_type=connection_type, text=position.source_text)
+
+    pipeline._item_head = core_item_head
+    pipeline.with_special_catalog_rules = core_rules
+    pipeline.position_to_output_row = core_row
+    actions._install_harness(None)
+    actions._install_harness(None)
+
+    sheet_gate = "Лист1\t\tШиберная заслонка  ПНД ф280 фф\t\t3"
+    assert "шибер" in pipeline._item_head(sheet_gate)
+    assert "врезк" in pipeline._item_head("Лист1\t\tВрезка 400/160\t\t1")
+    assert pipeline._item_head("Шумоглушитель ПП ф500") == "шумоглушитель пп ф"
+
+    ready = pipeline.with_special_catalog_rules(_Position("2", sheet_gate))
+    assert seen[-1] == "Шиберная заслонка  ПНД ф280 фф"
+    assert ready.source_text == sheet_gate  # номенклатура и система считаются по исходной строке
+    assert ready.size == {"d": 280.0}
+
+    for text in (sheet_gate, "Обратный клапан ПП ф500", "Врезка 400/160", "Шибер 160 без соединения"):
+        for chosen in ("socket", "none", "flange"):
+            row = pipeline.position_to_output_row(_Position("1", text), None, connection_type=chosen)
+            assert row.connection_type == "flange", (text, chosen)
+    assert pipeline.position_to_output_row(_Position("1", sheet_gate), None).text == "Шиберная заслонка  ПНД ф280 фф"
+
+    for text in ("Отвод 90 ф315", "Дроссель-клапан ПП ф250"):
+        assert pipeline.position_to_output_row(_Position("1", text), None, connection_type="socket").connection_type == "socket"
+    assert pipeline.position_to_output_row(
+        _Position("1", "Отвод 90 круглый без соединения"), None, connection_type="flange"
+    ).connection_type == "none"
+
+    for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+        del sys.modules[name]
+
+
+def test_only_first_sheet_goes_to_calc_and_preview(tmp_path):
+    """В расчёт идёт только первая вкладка Excel: остальные — черновики и справки клиента."""
+
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    first = book.active
+    first.title = "Заявка"
+    first.append(["Наименование", "Кол-во", "Ед."])
+    first.append(["Шибер ф250", 2, "шт"])
+    extra = book.create_sheet("Черновик")
+    extra.append(["Наименование", "Кол-во", "Ед."])
+    extra.append(["Воздуховод ф400", 10, "мп"])
+    book.active = 1
+    path = tmp_path / "two_sheets.xlsx"
+    book.save(path)
+
+    assert actions.spec_lines_text(path).splitlines() == ["1. Шибер ф250 — 2 шт; кол-во: 2"]
+    rows = actions._xlsx_rows(path)
+    assert rows[1][:2] == ["Шибер ф250", "2"]
