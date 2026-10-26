@@ -798,3 +798,62 @@ def test_install_prices_lone_connection_and_keeps_named_himvent(tmp_path, monkey
 
     for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
         del sys.modules[name]
+
+
+def test_split_system_nomenclature_moves_sheet_name_out_of_item():
+    """Исправление #25: система — в свой столбец; имя листа и файла туда не пишем."""
+
+    system, name = actions.split_system_nomenclature(
+        "Лист1\t\tОтвод 90 гр. ПНД ф280 фф\t\t8"
+    )
+    assert system is None
+    assert name == "Отвод 90 гр. ПНД ф280 фф"
+
+    system, name = actions.split_system_nomenclature(
+        "Заявка\t1\tВоздуховод ПНД ф280 L1915 фф\tшт\t1"
+    )
+    assert system is None
+    assert name == "Воздуховод ПНД ф280 L1915 фф"
+
+    system, name = actions.split_system_nomenclature(
+        "Лист1\t\tВоздуховод ПНД ф280 L1915 фф\t\t1 — отрезки по 1500 мм"
+    )
+    assert system is None
+    assert name == "Воздуховод ПНД ф280 L1915 фф — отрезки по 1500 мм"
+
+    system, name = actions.split_system_nomenclature(
+        "1. Воздуховод ПП ∅400 δ=4 — 14 мп; система В1; кол-во: 14"
+    )
+    assert system == "В1"
+    assert name == "1. Воздуховод ПП ∅400 δ=4 — 14 мп; кол-во: 14"
+
+    system, name = actions.split_system_nomenclature(
+        "1. Отвод 90 ф315; система цниим.xlsx; кол-во: 8"
+    )
+    assert system is None
+    assert name == "1. Отвод 90 ф315; кол-во: 8"
+
+    system, name = actions.split_system_nomenclature("Отвод 90 ф315 фланец", existing="П1")
+    assert system == "П1"
+    assert name == "Отвод 90 ф315 фланец"
+
+    system, name = actions.split_system_nomenclature("Отвод 90 ф315 фланец", existing="Лист1")
+    assert system is None
+    assert name == "Отвод 90 ф315 фланец"
+
+    @_dc(frozen=True)
+    class Row:
+        system: str | None
+        nomenclature: str
+        quantity: int
+
+    row = actions.with_system_column(
+        Row(system="Лист1", nomenclature="Лист1\t\tШиберная заслонка  ПНД ф280 фф\t\t3", quantity=3)
+    )
+    assert row.system is None
+    assert row.nomenclature == "Шиберная заслонка  ПНД ф280 фф"
+    assert row.quantity == 3
+
+    formula, name = actions.split_system_nomenclature("Лист1\t\t=SUM(G3:G70)\t\t")
+    assert formula is None
+    assert name == "'=SUM(G3:G70)"
