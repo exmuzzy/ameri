@@ -630,6 +630,9 @@ _PIECE_QTY_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*шт\.?", re.IGNORECASE)
 _LONE_RECT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*[xх×]\s*(\d+(?:[.,]\d+)?)", re.IGNORECASE)
 _LONE_MARKED_ROUND_RE = re.compile(r"(?:д|ø|⌀|∅)\s*(\d+(?:[.,]\d+)?)", re.IGNORECASE)
 _SYSTEM_MARK_RE = re.compile(r"\bсистема\s+([^,\n;]+)", re.IGNORECASE)
+# Прототип duct-calc для .xlsx пишет «ИмяЛиста\\tстрока». Заметка нарезки метража — суффикс после « — ».
+_SYSTEM_TAIL_RE = re.compile(r";\s*система\s+[^;\n]+", re.IGNORECASE)
+_SEGMENT_NOTE_RE = re.compile(r"\s+—\s+(?:отрезки по |остаток ).*$", re.IGNORECASE)
 
 
 def is_himvent_duct(source_text: str) -> bool:
@@ -720,6 +723,105 @@ def _system_label_from_text(text: str) -> str | None:
     return label or None
 
 
+def _is_qty_or_unit_field(field: str) -> bool:
+    text = field.strip()
+    return bool(re.fullmatch(r"\d+(?:[.,]\d+)?", text) or UNIT_CELL.fullmatch(text))
+
+
+def _is_header_field(field: str) -> bool:
+    low = field.lower().strip()
+    return low in INDEX_HEADERS or any(low.startswith(word) for word in HEADER_WORDS + CALC_HEADERS)
+
+
+def _is_nomenclature_field(field: str) -> bool:
+    """Ячейка названия изделия: есть буквы, это не шапка, не «8» и не «шт»."""
+
+    text = field.strip()
+    if not text or _is_qty_or_unit_field(text) or _is_header_field(text) or EXCEL_ERROR.fullmatch(text):
+        return False
+    return bool(re.search(r"[а-яa-z]", text, re.IGNORECASE))
+
+
+_SOURCE_FILENAME_RE = re.compile(
+    r"(?i)(?:^|[/\\])[^/\\]+\.(?:xlsx|xls|xlsm|csv|odt|docx|doc|md)$"
+)
+_DEFAULT_SHEET_RE = re.compile(r"(?i)^(?:лист|sheet)\s*\d+$")
+
+
+def _is_sheet_or_source_filename(label: str | None) -> bool:
+    """Имя листа Excel и имя исходного файла — не обозначение системы."""
+
+    text = (label or "").strip()
+    if not text:
+        return False
+    return bool(_DEFAULT_SHEET_RE.fullmatch(text) or _SOURCE_FILENAME_RE.search(text))
+
+
+def _allowed_system(label: str | None) -> str | None:
+    text = (label or "").strip()
+    if not text or _is_sheet_or_source_filename(text):
+        return None
+    return text
+
+
+def split_system_nomenclature(text: str, existing: str | None = None) -> tuple[str | None, str]:
+    """Настоящая система — в столбец «Система»; из номенклатуры её убрать.
+
+    Имя листа Excel и имя исходного файла системой не бывают: из номенклатуры
+    их тоже убираем, в колонку «Система» не пишем. В выгрузке прототипа имя
+    листа — первое поле до табуляции. Метка «; система В1» из заголовка раздела
+    остаётся обозначением системы.
+    """
+
+    raw = _plain_item_text(text).strip()
+    if not raw:
+        return (_allowed_system(existing), raw)
+    system = _allowed_system(existing)
+    note_match = _SEGMENT_NOTE_RE.search(raw)
+    note = note_match.group(0) if note_match else ""
+    body = raw[: note_match.start()].rstrip() if note_match else raw
+    if "\t" in body:
+        fields = body.split("\t")
+        prefix = fields[0].strip()
+        name = next((field.strip() for field in fields[1:] if _is_nomenclature_field(field)), "")
+        if name and prefix and prefix.casefold() != name.casefold():
+            # Первое поле выгрузки xlsx — имя листа, не система.
+            if system and system.casefold() == prefix.casefold():
+                system = None
+        elif prefix and not name:
+            name = prefix
+        name = name or body
+    else:
+        if not system:
+            system = _allowed_system(_system_label_from_text(body))
+        name = _SYSTEM_TAIL_RE.sub("", body).strip(" ;") or body
+    if note and note.strip() not in name:
+        name = name.rstrip() + note
+    return _allowed_system(system), _excel_plain_text(name)
+
+
+def _excel_plain_text(name: str) -> str:
+    """Текст, который Excel не примет за формулу: иначе книга не открывается."""
+
+    if name[:1] in "=+-@":
+        return "'" + name
+    return name
+
+
+def with_system_column(row):
+    """Систему из номенклатуры — в поле system; имя листа и файла туда не ставить."""
+
+    nomenclature = getattr(row, "nomenclature", None)
+    if not isinstance(nomenclature, str):
+        return row
+    system, name = split_system_nomenclature(nomenclature, getattr(row, "system", None))
+    if system == getattr(row, "system", None) and name == nomenclature:
+        return row
+    if is_dataclass(row) and not isinstance(row, type):
+        return replace(row, system=system, nomenclature=name)
+    return row
+
+
 def connection_unit_cost(kind: str, shape: str, dimensions: tuple[float, ...]):
     """Цена одного соединения. Считает прототип, свою цену сюда не пишем."""
 
@@ -743,11 +845,13 @@ def lone_connection_output_row(position, kind: str, section: tuple[str, tuple[fl
 
     shape, dimensions = section
     text = getattr(position, "source_text", "") or ""
-    row_system = system if system is not None else _system_label_from_text(text)
+    row_system, name = split_system_nomenclature(
+        text, system if system is not None else _system_label_from_text(text)
+    )
     source_no = getattr(position, "source_no", "")
     return _output_row(
         system=row_system,
-        nomenclature=text.strip() or f"Позиция {source_no}",
+        nomenclature=name.strip() or f"Позиция {source_no}",
         length_mm=None,
         quantity=stated_piece_quantity(getattr(position, "qty", None), text),
         thickness_mm=None,
@@ -831,8 +935,10 @@ def _install_coupling_as_socket(pipeline) -> None:
                     return lone_connection_output_row(position, kind, section, system=system)
             if names_no_connection(text):
                 connection_type = "none"
-            return original_row(
-                position, coefficients, *args, system=system, connection_type=connection_type, **kwargs
+            return with_system_column(
+                original_row(
+                    position, coefficients, *args, system=system, connection_type=connection_type, **kwargs
+                )
             )
 
         pipeline.position_to_output_row = position_to_output_row
