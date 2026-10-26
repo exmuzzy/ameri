@@ -628,6 +628,55 @@ def test_himvent_and_lone_connection_are_read_from_the_line():
     assert actions.stated_piece_quantity(None, "фланец 355") == 1
     assert actions.stated_piece_quantity(None, "фланец 355 — 4 шт") == 4
     assert actions.stated_piece_quantity(4, "фланец 355") == 4
+    # Развернутое описание со словом «для» — тоже отдельный фланец (заявка 145845)
+    catalog = "Фланец для прямоугольного воздуховода из полипропилена 200х200 мм, толщина для P=3000 Па, цвет серый"
+    assert actions.lone_connection_kind(catalog) == "flange"
+    assert actions.lone_connection_section(catalog) == ("rect", (200.0, 200.0))
+    pnd = (
+        "Фланец для прямоугольного воздуховода из полиэтилена низкого давления для наружной "
+        "прокладки морозостойкий (до -40°C), стойкий к УФ, 1000х600 мм, толщина для P=3000 Па, цвет черный"
+    )
+    assert actions.lone_connection_kind(pnd) == "flange"
+    assert actions.lone_connection_section(pnd) == ("rect", (1000.0, 600.0))
+    assert actions.lone_connection_kind("Раструб для круглого воздуховода 315") == "socket"
+    assert actions.lone_connection_kind("Фланец перехода 630х400") is None
+    assert actions.lone_connection_kind("Фланцевая заглушка для воздуховода 400") is None
+
+
+def test_n_header_spec_goes_through_line_converter(tmp_path):
+    """Заявка с шапкой «N … Количество потребности» (форма 145845) режется нашим конвертером:
+    прототип получает готовые строки с количеством, шапка и нумерация колонок не позиции."""
+
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "Заявка"
+    sheet.append(["N", "Наименование ТМЦ", "ГОСТ,ТУ", "Производи-тель", "Ед. изм.", "Количество потребности"])
+    sheet.append(["1", "2", "3", "4", "5", "6"])
+    sheet.append([1, "Воздуховод из полипропилена прямоугольного сечения фланцевый 400х400 мм", None, None, "шт.", 8])
+    sheet.append([2, "Фланец для прямоугольного воздуховода из полипропилена 200х200 мм", None, None, "шт.", 5])
+    path = tmp_path / "заявка.xlsx"
+    book.save(path)
+    lines = actions.spec_lines_text(path)
+    assert lines is not None
+    assert "1. Воздуховод из полипропилена прямоугольного сечения фланцевый 400х400 мм — 8 шт.; кол-во: 8" in lines
+    assert "2. Фланец для прямоугольного воздуховода из полипропилена 200х200 мм — 5 шт.; кол-во: 5" in lines
+    assert "2 — 3 4 5 6" not in lines  # строка нумерации колонок — не позиция
+
+
+def test_prototype_number_header_spec_is_left_to_prototype(tmp_path):
+    """Шапка «№» — родная для прототипа: файл уходит ему целиком, конвертер отступает."""
+
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append(["№", "Наименование", "Ед.", "Кол-во"])
+    sheet.append([1, "Отвод 90 ф200", "шт", 3])
+    path = tmp_path / "spec.xlsx"
+    book.save(path)
+    assert actions.spec_lines_text(path) is None
     assert actions.stated_piece_quantity("4", "фланец 355") == 4
     assert actions.stated_piece_quantity("4", "фланец 355 — 2 шт") == 4
     assert actions.stated_piece_quantity("нет", "фланец 355 — 4 шт") == 4

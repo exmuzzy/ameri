@@ -93,6 +93,10 @@ HEADER_WORDS = (
     "наименование", "номенклатура", "кол-во", "количество", "ед.", "ед ", "единица", "позиция", "примечание"
 )
 INDEX_HEADERS = ("№", "n", "no", "№ п/п", "поз.", "поз")
+# Шапки колонки с номерами, которые узнаёт сам прототип duct-calc (document_parser):
+# только при них файл уходит ему целиком. Прочие («N», «поз.») прототип не режет
+# по номерам сам — их разбирает в строки наш конвертер со значениями формул.
+PROTOTYPE_INDEX_HEADERS = ("№", "№ п/п", "номер")
 # Расчётные колонки (клиенты присылают заявку в копии нашей расчётки): их нули и #DIV/0! — не текст позиции.
 CALC_HEADERS = (
     "s ", "площад", "цена", "плотност", "% на", "раскрой", "к/эф", "коэф", "итого", "соединени", "масса",
@@ -141,6 +145,9 @@ def table_lines(rows: list[list[str]]) -> list[tuple[str, str | None]]:
             continue
         if index_column and len(cells) > 1 and cells[0].rstrip(".").isdigit():
             cells = cells[1:]
+        if len(cells) > 1 and all(re.fullmatch(r"\d+(?:[.,]\d+)?", cell) for cell in cells):
+            # Строка нумерации колонок («1 | 2 | 3 | 4 | 5 | 6») — не позиция.
+            continue
         if len(cells) == 1:
             lines.append((cells[0], None))
             continue
@@ -173,8 +180,11 @@ SYSTEM_HEADING = re.compile(r"^система\s+\S+", re.IGNORECASE)
 
 
 def _xlsx_items(path: Path) -> list[list[str] | str] | None:
-    """Строки Excel без колонки «№»: такие прототип нарезает на позиции моделью, и она склеивает
-    заголовок, шапку и первую позицию. С колонкой «№» — None: прототип делит позиции по номерам сам."""
+    """Строки Excel без шапки прототипа («№», «№ п/п», «номер»): такие файлы он нарезает
+    на позиции сам, по номерам. Остальные — даже с колонкой номеров «N» — читает наш
+    конвертер: он берёт вычисленные значения формул Excel, которых прототип не видит.
+
+    """
 
     import openpyxl
 
@@ -188,7 +198,7 @@ def _xlsx_items(path: Path) -> list[list[str] | str] | None:
             for row in sheet.iter_rows(values_only=True):
                 cells = ["" if value is None else str(value).strip() for value in row]
                 filled = [cell for cell in cells if cell]
-                if any(cell.lower() in INDEX_HEADERS for cell in filled):
+                if any(cell.lower() in PROTOTYPE_INDEX_HEADERS for cell in filled):
                     return None
                 if len(filled) == 1:
                     items.append(filled[0])
@@ -636,6 +646,8 @@ def lone_connection_kind(source_text: str) -> str | None:
     """Строка сама называется фланцем или раструбом и задаёт размер.
 
     «Отвод … фланец» — изделие с соединением на хвосте. «фланец 20» — не диаметр.
+    Развернутое описание со словом «для» («Фланец для прямоугольного воздуховода
+    из полипропилена 200х200 мм, толщина …») — тоже отдельный фланец.
     """
 
     text = _plain_item_text(source_text)
@@ -645,12 +657,15 @@ def lone_connection_kind(source_text: str) -> str | None:
     head = (head_match.group(1) if head_match else "").lower().replace("ё", "е")
     words = re.findall(r"[a-zа-я]+", head)
     core = [word for word in words if word not in _LONE_CONNECTION_FILLER]
-    if len(core) != 1:
-        return None
-    if core[0] in _FLANGE_WORDS:
+    if len(core) == 1 and core[0] in _FLANGE_WORDS:
         return "flange"
-    if core[0] in _SOCKET_WORDS:
+    if len(core) == 1 and core[0] in _SOCKET_WORDS:
         return "socket"
+    if words and "для" in words:
+        if words[0] in _FLANGE_WORDS:
+            return "flange"
+        if words[0] in _SOCKET_WORDS:
+            return "socket"
     return None
 
 
