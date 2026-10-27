@@ -8,11 +8,12 @@ import tempfile
 import zipfile
 import xml.etree.ElementTree as ET
 
+import httpx
 import yaml
 from dataclasses import dataclass, field, is_dataclass, replace
 from pathlib import Path
 
-from .llm import DeepSeekChat, key_problem
+from .llm import DEEPSEEK_TIMEOUT, NO_CONNECTION_MESSAGE, DeepSeekChat, key_problem
 from .materials import MAX_SECTIONS, Material, find_sections, sections_context
 from .store import Attachment, Message, Usage
 
@@ -1218,8 +1219,17 @@ def _install_harness(harness_dir: Path | None) -> None:
         setattr(pipeline, attr, tuple(base) + extra)
 
 
-# На каждую часть спецификации (~90 строк). Два повтора при сбое остаются в клиенте модели.
-DUCT_MODEL_TIMEOUT_SECONDS = 7 * 60
+_RETRYABLE_HTTP_RE = re.compile(r"\bHTTP (?:5\d\d|429)\b")
+
+
+def is_no_connection(error: BaseException) -> bool:
+    """Ошибка клиента модели прототипа — сбой связи с DeepSeek, а не поломка разбора.
+
+    Сетевую ошибку прототип оборачивает (`from error`), код HTTP пишет только в тексте.
+    """
+
+    return isinstance(error.__cause__, httpx.RequestError) or bool(_RETRYABLE_HTTP_RE.search(str(error)))
+
 
 NO_POSITIONS_TEXT = (
     "Расчётка не построена: в файле не нашлось ни одной позиции с размерами и количеством. "
@@ -1280,7 +1290,7 @@ def duct_calc(
         return ActionResult(text=problem)
     _import_duct_calc(duct_calc_dir)
     _install_harness(harness_dir)
-    from duct_calc.model_client import DeepSeekClient, ModelClientConfig
+    from duct_calc.model_client import DeepSeekClient, ModelClientConfig, ModelClientError
     from duct_calc.pipeline import PipelineNeedsInput, run_specification_pipeline
 
     client = DeepSeekClient(
@@ -1288,7 +1298,9 @@ def duct_calc(
             base_url=base_url,
             api_key=api_key,
             model=model,
-            timeout_seconds=DUCT_MODEL_TIMEOUT_SECONDS,
+            # Прототип передаёт значение в httpx как есть, поэтому соединение и ответ ограничены раздельно.
+            # Ограничение — на каждую часть спецификации (~90 строк); один повтор при сбое делает прототип.
+            timeout_seconds=DEEPSEEK_TIMEOUT,
         )
     )
     with tempfile.TemporaryDirectory() as tmp:
@@ -1342,6 +1354,10 @@ def duct_calc(
                 summary = f"Позиций: {result.completeness.model_position_count}."
         except PipelineNeedsInput as error:
             return ActionResult(text=f"Нужно уточнение, расчётка не построена: {error}")
+        except ModelClientError as error:
+            if not is_no_connection(error):
+                raise
+            return ActionResult(text=NO_CONNECTION_MESSAGE)
         except ValueError as error:
             if "без позиций" not in str(error):
                 raise

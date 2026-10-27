@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from ameri import actions
 from ameri.harness import assistant_prompt, load_access
 from ameri.auth import User
@@ -402,13 +404,17 @@ def test_request_in_copy_of_our_calc_template_keeps_only_name_quantity_unit(tmp_
     ]
 
 
-def fake_prototype(tmp_path, error: str) -> Path:
-    """Минимальный duct-calc: pipeline падает с ValueError, как прототип на файле без позиций."""
+def fake_prototype(tmp_path, error: str, raise_line: str | None = None) -> Path:
+    """Минимальный duct-calc: pipeline падает с ValueError, как прототип на файле без позиций.
+
+    `raise_line` заменяет эту ошибку другой строкой `raise …` (например, ошибкой клиента модели).
+    """
 
     package = tmp_path / "proto" / "src" / "duct_calc"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "model_client.py").write_text(
+        "class ModelClientError(RuntimeError): pass\n"
         "class ModelClientConfig:\n"
         "    last = None\n"
         "    def __init__(self, **kw):\n"
@@ -416,14 +422,17 @@ def fake_prototype(tmp_path, error: str) -> Path:
         "class DeepSeekClient:\n    def __init__(self, config): pass\n",
         encoding="utf-8",
     )
+    raise_line = raise_line or f"raise ValueError({error!r})"
     (package / "pipeline.py").write_text(
         "PASSTHROUGH_ITEM_KEYWORDS = ()\nGRID_KEYWORDS = ()\nVALVE_KEYWORDS = ()\n"
         "def build_system_prompt(): return ''\n"
         "def with_umbrella_optional_neck_key(*a, **kw): return a[0] if a else None\n"
         "def preview_specification(*a, **kw): return None\n"
         "def compare_completeness(*a, **kw): return None\n"
+        "import httpx\n"
+        "from duct_calc.model_client import ModelClientError\n"
         "class PipelineNeedsInput(ValueError): pass\n"
-        f"def run_specification_pipeline(**kw): raise ValueError({error!r})\n",
+        f"def run_specification_pipeline(**kw):\n    {raise_line}\n",
         encoding="utf-8",
     )
     (tmp_path / "proto" / "data").mkdir()
@@ -446,9 +455,82 @@ def test_duct_calc_explains_spec_without_positions(tmp_path, monkeypatch):
     assert result.text == actions.NO_POSITIONS_TEXT
     from duct_calc.model_client import ModelClientConfig
 
-    assert ModelClientConfig.last["timeout_seconds"] == 7 * 60
+    # Зависшее соединение видно через 15 с, ответ модели ждём до 2 минут.
+    timeout = ModelClientConfig.last["timeout_seconds"]
+    assert (timeout.connect, timeout.read) == (15, 120)
     for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
         del sys.modules[name]
+
+
+@pytest.mark.parametrize(
+    ("raise_line", "no_connection"),
+    [
+        ("raise ModelClientError('Не удалось подключиться к API модели') from httpx.ConnectTimeout('tls')", True),
+        ("raise ModelClientError('Модель не успела ответить.') from httpx.ReadTimeout('read')", True),
+        ("raise ModelClientError('API модели вернул HTTP 503')", True),
+        ("raise ModelClientError('API модели вернул HTTP 429')", True),
+        ("raise ModelClientError('API модели вернул HTTP 401')", False),
+        ("raise ModelClientError('Модель вернула пустой ответ')", False),
+    ],
+)
+def test_duct_calc_says_no_connection_only_for_network_failures(tmp_path, monkeypatch, raise_line, no_connection):
+    import sys
+
+    from ameri.llm import NO_CONNECTION_MESSAGE
+
+    for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+        monkeypatch.delitem(sys.modules, name)
+    proto = fake_prototype(tmp_path, "", raise_line=raise_line)
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    spec_path = tmp_path / "spec.docx"
+    spec_path.write_bytes(b"")
+    spec = Attachment(id=1, name="spec.docx", path=spec_path, size=0)
+    try:
+        if no_connection:
+            result = actions.duct_calc(
+                spec=spec, connection_label="Фланец", duct_calc_dir=proto, base_url="u", api_key="sk-test", model="m"
+            )
+            assert result.text == NO_CONNECTION_MESSAGE
+        else:
+            # Поломку разбора не выдаём за сбой связи: менеджер увидит настоящую ошибку.
+            with pytest.raises(RuntimeError):
+                actions.duct_calc(
+                    spec=spec, connection_label="Фланец", duct_calc_dir=proto, base_url="u", api_key="sk-test", model="m"
+                )
+    finally:
+        for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+            del sys.modules[name]
+
+
+def test_chat_model_says_no_connection_and_waits_two_minutes():
+    import httpx
+
+    from ameri.llm import NO_CONNECTION_MESSAGE, DeepSeekChat, LlmError, NoConnectionError
+
+    timeouts = []
+
+    def chat(handler):
+        def recording(request):
+            timeouts.append(request.extensions["timeout"])
+            return handler(request)
+
+        client = httpx.Client(transport=httpx.MockTransport(recording))
+        return DeepSeekChat(base_url="https://x", api_key="sk-test", model="m", http_client=client)
+
+    def hang(request):
+        raise httpx.ConnectTimeout("handshake", request=request)
+
+    with pytest.raises(NoConnectionError, match=NO_CONNECTION_MESSAGE):
+        chat(hang).complete([{"role": "user", "content": "?"}])
+    assert len(timeouts) == 2
+    assert (timeouts[0]["connect"], timeouts[0]["read"]) == (15, 120)
+
+    with pytest.raises(NoConnectionError):
+        chat(lambda request: httpx.Response(503)).complete([{"role": "user", "content": "?"}])
+
+    with pytest.raises(LlmError, match="ошибкой 401") as error:
+        chat(lambda request: httpx.Response(401)).complete([{"role": "user", "content": "?"}])
+    assert not isinstance(error.value, NoConnectionError)
 
 
 def test_duct_calc_text_wraps_chat_message(monkeypatch, tmp_path):
