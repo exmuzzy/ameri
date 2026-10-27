@@ -29,7 +29,12 @@ ROOT = Path(__file__).resolve().parents[1]
 DEMO = ROOT / "demo"
 DEFAULT_URL = "https://159-194-254-146.sslip.io"
 POST_TIMEOUT = 600  # расчётка идёт несколько минут
-ERROR_PREFIXES = ("Действие завершилось ошибкой", "Не получилось обратиться", "Ключ DeepSeek не задан")
+ERROR_PREFIXES = (
+    "Действие завершилось ошибкой",
+    "Не получилось обратиться",
+    "Нет связи с DeepSeek",
+    "Ключ DeepSeek не задан",
+)
 
 
 def log(text: str) -> None:

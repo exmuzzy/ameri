@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from . import actions
 from .auth import User
 from .harness import Access, HarnessRepo, assistant_prompt
-from .llm import DeepSeekChat, LlmError
+from .llm import DeepSeekChat, LlmError, NoConnectionError
 from .materials import load_materials
 from .settings import Settings
 from .store import Chat, Message, Store
@@ -109,6 +109,8 @@ def run_action(
                 names,
                 materials=load_materials(settings.harness_dir),
             )
+    except NoConnectionError as error:
+        result = actions.ActionResult(str(error))
     except LlmError as error:
         result = actions.ActionResult(f"Не получилось обратиться к модели: {error}")
     except Exception as error:  # noqa: BLE001 - ошибка показывается в чате и не роняет страницу

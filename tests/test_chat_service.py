@@ -47,6 +47,29 @@ def test_duct_action_uses_text_when_file_missing(tmp_path, monkeypatch):
     }
 
 
+def test_ask_action_says_no_connection_without_prefix(tmp_path, monkeypatch):
+    from ameri.llm import NO_CONNECTION_MESSAGE, LlmError, NoConnectionError
+
+    store = Store(tmp_path / "db.sqlite3", tmp_path / "files")
+    chat_id = store.create_chat("t", "anna")
+    message = store.add_message(chat_id, author="anna", role="user", content="Какая толщина?", action=chat_service.ACTION_ASK)
+    chat = store.list_chats(owner="anna")[0]
+
+    def lost(*args, **kwargs):
+        raise NoConnectionError()
+
+    monkeypatch.setattr(actions, "ask_assistant", lost)
+    answer = chat_service.run_action(store, _settings(tmp_path), chat, message, chat_service.ACTION_ASK, None, {})
+    assert answer.content == NO_CONNECTION_MESSAGE
+
+    def refused(*args, **kwargs):
+        raise LlmError("DeepSeek ответил ошибкой 401")
+
+    monkeypatch.setattr(actions, "ask_assistant", refused)
+    answer = chat_service.run_action(store, _settings(tmp_path), chat, message, chat_service.ACTION_ASK, None, {})
+    assert answer.content == "Не получилось обратиться к модели: DeepSeek ответил ошибкой 401"
+
+
 def test_duct_action_explains_how_to_send_spec_without_file_or_text(tmp_path):
     store = Store(tmp_path / "db.sqlite3", tmp_path / "files")
     chat_id = store.create_chat("t", "anna")

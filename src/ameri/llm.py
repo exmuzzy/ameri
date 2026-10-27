@@ -11,6 +11,20 @@ class LlmError(RuntimeError):
     """Понятная пользователю ошибка обращения к модели."""
 
 
+NO_CONNECTION_MESSAGE = "Нет связи с DeepSeek, попробуйте позже."
+
+# Зависшее соединение (с сервера до DeepSeek оно рвётся на установке TLS) видно через 15 с;
+# ответ модели ждём до 2 минут. Так же — для расчётки.
+DEEPSEEK_TIMEOUT = httpx.Timeout(120, connect=15)
+
+
+class NoConnectionError(LlmError):
+    """DeepSeek не ответил: нет соединения, истекло ожидание или API перегружен (5xx, 429)."""
+
+    def __init__(self) -> None:
+        super().__init__(NO_CONNECTION_MESSAGE)
+
+
 BAD_KEY_MESSAGE = (
     "Ключ DeepSeek на сервере содержит недопустимые символы (кириллицу или пробелы): "
     "Администратору нужно заново вставить ключ в «Настройках»."
@@ -34,7 +48,7 @@ class DeepSeekChat:
         base_url: str,
         api_key: str,
         model: str,
-        timeout_seconds: float = 180,
+        timeout: httpx.Timeout = DEEPSEEK_TIMEOUT,
         http_client: httpx.Client | None = None,
     ) -> None:
         problem = key_problem(api_key)
@@ -43,7 +57,7 @@ class DeepSeekChat:
         self.endpoint = base_url.rstrip("/") + "/chat/completions"
         self.api_key = api_key
         self.model = model
-        self.timeout_seconds = timeout_seconds
+        self.timeout = timeout
         self._http = http_client or httpx.Client()
 
     def complete(
@@ -55,7 +69,6 @@ class DeepSeekChat:
     ) -> tuple[str, Usage]:
         """Ответ модели и расход токенов (включая попадания в кэш префикса DeepSeek)."""
 
-        last_error: Exception | None = None
         for _attempt in range(2):  # одна повторная попытка при сетевом сбое или 5xx
             try:
                 response = self._http.post(
@@ -70,13 +83,11 @@ class DeepSeekChat:
                         # В режиме рассуждений temperature игнорируется; для ответов в Чате он не нужен.
                         "thinking": {"type": "disabled"},
                     },
-                    timeout=self.timeout_seconds,
+                    timeout=self.timeout,
                 )
-            except httpx.HTTPError as error:
-                last_error = LlmError(f"DeepSeek недоступен: {error.__class__.__name__}")
+            except httpx.HTTPError:
                 continue
             if response.status_code >= 500 or response.status_code == 429:
-                last_error = LlmError(f"DeepSeek временно недоступен ({response.status_code})")
                 continue
             if response.status_code != 200:
                 raise LlmError(f"DeepSeek ответил ошибкой {response.status_code}")
@@ -91,4 +102,4 @@ class DeepSeekChat:
                 completion_tokens=int(usage.get("completion_tokens") or 0),
                 cache_hit_tokens=int(usage.get("prompt_cache_hit_tokens") or 0),
             )
-        raise last_error or LlmError("DeepSeek недоступен")
+        raise NoConnectionError()
