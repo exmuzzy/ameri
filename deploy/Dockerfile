@@ -1,4 +1,7 @@
-FROM python:3.13-slim
+# Версия образа закреплена: пока она не меняется, шаги с LibreOffice и библиотеками Python берутся
+# из кэша сервера, и сборка не ходит в Debian и PyPI. Обновлять вручную (например, раз в месяц):
+# digest из `docker buildx imagetools inspect python:3.13-slim`.
+FROM python:3.13-slim@sha256:b3575dcf816cdacc5292df77a6e3e59b8941631078373a045efa2ac1e9c5c3b2
 
 # LibreOffice нужен прототипу расчётки: чтение .doc и пересчёт формул XLSX.
 RUN apt-get update \
