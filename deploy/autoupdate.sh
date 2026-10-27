@@ -8,6 +8,9 @@ ROOT=/srv/ameri
 BRANCH="${AMERI_BRANCH:-master}"
 STATUS="$ROOT/data/update-status.json"
 REQUEST="$ROOT/data/update-request"
+# Версия, на которой сайт реально запущен. Код в app/ переходит на новую версию до сборки,
+# поэтому после неудачной сборки сравнивать с ним нельзя: повтор ответил бы «Уже последняя версия».
+DEPLOYED_FILE="$ROOT/data/deployed-commit"
 exec 9>/run/ameri-autoupdate.lock
 flock -n 9 || exit 0
 
@@ -25,7 +28,9 @@ status running "Проверяю обновления"
 if ! git fetch -q origin "$BRANCH"; then
   status error "Не удалось связаться с GitHub"; exit 1
 fi
-LOCAL=$(git rev-parse HEAD)
+# Первый запуск со списком версий: запущена та, на которой стоит app/ (код ещё не сдвинут).
+[ -s "$DEPLOYED_FILE" ] || git rev-parse HEAD > "$DEPLOYED_FILE"
+LOCAL=$(cat "$DEPLOYED_FILE")
 REMOTE=$(git rev-parse "origin/$BRANCH")
 
 if [ -d "$ROOT/data/repo/.git" ]; then
@@ -37,7 +42,8 @@ if [ "$LOCAL" = "$REMOTE" ]; then
   status done "Уже последняя версия"; exit 0
 fi
 
-CHANGED=$(git diff --name-only "$LOCAL" "$REMOTE")
+# Если запущенной версии нет в истории, считаем, что изменился код.
+CHANGED=$(git diff --name-only "$LOCAL" "$REMOTE") || CHANGED="?"
 git reset -q --hard "origin/$BRANCH"
 if echo "$CHANGED" | grep -qvE '^(harness/|docs/|README\.md|CONTEXT\.md)'; then
   status running "Изменился код — пересобираю сайт, это займёт несколько минут"
@@ -51,10 +57,12 @@ if echo "$CHANGED" | grep -qvE '^(harness/|docs/|README\.md|CONTEXT\.md)'; then
     if echo "$CHANGED" | grep -qx 'deploy/Caddyfile'; then
       (cd "$ROOT/app/deploy" && docker compose restart caddy) >> /var/log/ameri-update.log 2>&1
     fi
+    echo "$REMOTE" > "$DEPLOYED_FILE"
     status done "Сайт пересобран и перезапущен"
   else
     status error "Пересборка не удалась, см. /var/log/ameri-update.log"; exit 1
   fi
 else
+  echo "$REMOTE" > "$DEPLOYED_FILE"
   status done "Харнес и статьи обновлены"
 fi
