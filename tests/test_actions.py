@@ -1289,3 +1289,52 @@ def test_round_tee_length_uses_smaller_diameter_even_if_model_took_main(real_duc
     # Длина из строки или от модели не меняется; без диаметров в строке остаётся ответ модели.
     assert tee("2", text, {"d": 300, "branch_d": 150}, length=900).length_mm == 900
     assert tee("3", "Тройник ф110", {"d": 110, "branch_d": None}).length_mm == 410
+
+
+def test_long_straight_is_nonstandard_whatever_the_quantity(real_duct_calc):
+    """Прямик длиннее 1500 мм — нестандарт: раскрой 1,5, работа 3, и при 1, и при 7 штуках.
+
+    Иначе 7 штук L2000 выходили дешевле за м², чем стандартный кусок 1500, а одна такая штука — вдвое дороже.
+    """
+
+    from decimal import Decimal
+
+    actions._install_harness(None)
+    actions._install_harness(None)  # повторная установка не оборачивает обёртку
+    from duct_calc import pipeline
+    from duct_calc.coefficients import CoefficientTable
+    from duct_calc.model_schema import parse_model_response
+
+    if not pipeline.DEFAULT_TEMPLATE_PATH.is_file():
+        pytest.skip("нет шаблона расчётки")
+    coefficients = CoefficientTable.from_workbook(pipeline.DEFAULT_TEMPLATE_PATH)
+
+    def straight(text, size, qty, length):
+        element_type = "straight_round" if "d" in size else "straight_rect"
+        raw = {"source_no": "1", "source_text": text, "element_type": element_type, "qty": qty, "size": size,
+               "length_mm": length, "ends": [{"role": r, "connection": "flange"} for r in ("in", "out")]}
+        position = parse_model_response({"positions": [raw]}).positions[0]
+        if length is None:
+            return position, None
+        return position, pipeline.position_to_output_row(position, coefficients, connection_type="flange")
+
+    def lm(row):
+        return (Decimal(str(row.l)), Decimal(str(row.m)))
+
+    nonstandard = (Decimal("1.5"), Decimal("3"))
+    assert lm(straight("Воздуховод ПНД ф150 L2000 фф — 7 шт", {"d": 150}, 7, 2000)[1]) == nonstandard
+    assert lm(straight("Воздуховод ПНД ф150 L2000 фф — 1 шт", {"d": 150}, 1, 2000)[1]) == nonstandard
+    assert lm(straight("Воздуховод 500х300 L2000 — 4 шт", {"a": 500, "b": 300}, 4, 2000)[1]) == nonstandard
+    # Ровно 1500 и короче — как в шаблоне, правило их не трогает.
+    assert lm(straight("Воздуховод ПНД ф150 L1500 фф — 3 шт", {"d": 150}, 3, 1500)[1]) == (Decimal("1.2"), Decimal("2.4"))
+    assert lm(straight("Воздуховод ПНД ф150 L1350 фф — 3 шт", {"d": 150}, 3, 1350)[1]) == (Decimal("1.3"), Decimal("2.4"))
+
+    # Погонаж режется по 1500 и остаток — куски не длиннее 1500, коэффициенты обычные.
+    position, _ = straight("Воздуховод ПНД ф150 — 3,2 м", {"d": 150}, 1, None)
+    rows = pipeline._meter_segment_rows(
+        position, coefficients, total_meters=Decimal("3.2"), system=None, connection_type="flange"
+    )
+    assert [(row.length_mm, lm(row)) for row in rows] == [
+        (1500, (Decimal("1.2"), Decimal("2.4"))),
+        (200, (Decimal("1.3"), Decimal("2.4"))),
+    ]

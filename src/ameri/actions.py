@@ -1370,12 +1370,34 @@ def _install_tee_branch(pipeline) -> None:
     pipeline.with_standard_tee_equal_branch = lambda position: original(round_tee_from_text(position))
 
 
+LONG_STRAIGHT_CATEGORY = "нестандарт фасон"
+
+
+def _install_long_straight_as_nonstandard(pipeline) -> None:
+    """Прямик длиннее 1500 мм — нестандарт (раскрой 1,5, работа 3) при любом числе штук.
+
+    Прототип давал нескольким таким штукам свои 1,5 / 1,5 (прямоугольным 1,7 / 1,7) — решение заказчика 2026-10-30.
+    """
+
+    if not hasattr(pipeline, "_straight_piece_adjustment"):
+        return
+    original = getattr(pipeline, "_ameri_original_straight_piece", None) or pipeline._straight_piece_adjustment
+    pipeline._ameri_original_straight_piece = original
+    long_categories = set(getattr(pipeline, "LONG_MULTI_COEFFICIENTS", {}))
+
+    def _straight_piece_adjustment(position):
+        updated, problem, category = original(position)
+        return updated, problem, LONG_STRAIGHT_CATEGORY if category in long_categories else category
+
+    pipeline._straight_piece_adjustment = _straight_piece_adjustment
+
+
 def _install_harness(harness_dir: Path | None) -> None:
     """Подключить Харнес к прототипу duct-calc: правила разбора, ключевые слова, решения Q38 и Q39.
 
     Поверх прототипа: ХИМВЕНТ на названном элементе считается, отдельный фланец или раструб
     попадает в стоимость соединения, система из строки не теряется, если модель её отбросила,
-    ответвление круглого тройника — меньший диаметр из строки.
+    ответвление круглого тройника — меньший диаметр из строки, прямик длиннее 1500 мм — нестандарт.
     """
 
     from duct_calc import pipeline
@@ -1385,6 +1407,7 @@ def _install_harness(harness_dir: Path | None) -> None:
     _install_catalog_line_rules(pipeline)
     _install_source_line_restore(pipeline)
     _install_tee_branch(pipeline)
+    _install_long_straight_as_nonstandard(pipeline)
 
     original = getattr(pipeline, "_ameri_original_prompt", None) or pipeline.build_system_prompt
     pipeline._ameri_original_prompt = original
