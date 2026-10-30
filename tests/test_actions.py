@@ -1060,20 +1060,22 @@ def test_only_first_sheet_goes_to_calc_and_preview(tmp_path):
 
 
 def test_round_flange_price_from_sheet_by_outer_edge():
-    """Круглый фланец не из прайса: лист 4,5 м², число фланцев с листа — по наружному краю (⌀ + 100).
+    """Круглый фланец не из прайса: лист 4,5 м², число фланцев с листа — по диаметру фланца.
 
     Цена материала здесь условная (200 ₽/кг), цена компании — только в шаблоне расчётки.
     """
 
     from decimal import Decimal
 
-    # ⌀370: 7 000 000 / 629² = 17,69 → 18 с листа (с округлением вниз было бы 17 и 467,58).
-    assert actions.round_flange_price(370, 6, 200) == Decimal("441.60")
-    # ⌀1100, фланец 12 мм: 7 000 000 / 1359² = 3,79 → 4 с листа.
+    # ⌀370: 7 000 000 / 529² = 25,01 → 25 с листа.
+    assert actions.round_flange_price(370, 6, 200) == Decimal("317.95")
+    # ⌀420: 7 000 000 / 579² = 20,88 → 21 с листа (с округлением вниз было бы 20 и 397,44).
+    assert actions.round_flange_price(420, 6, 200) == Decimal("378.51")
+    # ⌀1100, фланец 12 мм: 7 000 000 / 1259² = 4,42 → 4 с листа.
     assert actions.round_flange_price(1100, 12, 200) == Decimal("3974.40")
     # Толщина и цена материала входят в цену листа прямо пропорционально.
-    assert actions.round_flange_price(370, 8, 200) == Decimal("588.80")
-    assert actions.round_flange_price(370, 6, 100) == Decimal("220.80")
+    assert actions.round_flange_price(370, 8, 200) == Decimal("423.94")
+    assert actions.round_flange_price(370, 6, 100) == Decimal("158.98")
     # С листа не выходит ни одного фланца — новой формулой не считается.
     assert actions.round_flange_price(4000, 12, 200) is None
 
@@ -1127,13 +1129,13 @@ def test_round_flange_not_in_price_list_uses_sheet_price(real_duct_calc, tmp_pat
         return DEFAULT_PRICE_BOOK.pair_price(end, **kwargs)
 
     d370 = ConnectionEnd.round(370, "flange")
-    assert price(d370).price == Decimal("883.20")  # пара = 2 × 441,60
+    assert price(d370).price == Decimal("635.90")  # пара = 2 × 317,95
     assert price(d370).source == "calculated"
-    assert flange_cost([d370] * 4) == Decimal("1766.40")  # 4 конца — 2 пары
-    assert actions.connection_unit_cost("flange", "round", (370,)) == Decimal("441.60")
+    assert flange_cost([d370] * 4) == Decimal("1271.80")  # 4 конца — 2 пары
+    assert actions.connection_unit_cost("flange", "round", (370,)) == Decimal("317.95")
     # Толщина стенки отвода (3 мм от модели или из строки) не делает фланец тоньше: он по таблице фланцев, 6 мм.
     assert price(d370, explicit_flange_thickness_mm=3) == price(d370)
-    assert flange_cost([d370] * 2, explicit_flange_thickness_mm=3) == Decimal("883.20")
+    assert flange_cost([d370] * 2, explicit_flange_thickness_mm=3) == Decimal("635.90")
 
     for end in (ConnectionEnd.round(355, "flange"), ConnectionEnd.rect(550, 350, "flange"), ConnectionEnd.rect(600, 300, "flange")):
         assert price(end) == original(DEFAULT_PRICE_BOOK, end), end

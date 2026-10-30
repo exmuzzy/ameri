@@ -1179,14 +1179,14 @@ def _install_catalog_line_rules(pipeline) -> None:
 
 
 def round_flange_price(d_mm, thickness_mm, material_price) -> Decimal | None:
-    """Цена одного круглого фланца не из прайса: с листа 4,5 м², по наружному краю фланца (сечение + 100 мм).
+    """Цена одного круглого фланца не из прайса: с листа 4,5 м², по диаметру фланца (+159 мм — полка и отход).
 
+    С диаметром фланца формула повторяет число фланцев с листа из прайса шаблона (⌀110–650).
     None — если с листа не выходит ни одного фланца.
     """
 
     sheet_price = Decimal(str(thickness_mm)) * Decimal("4.5") * Decimal("0.92") * Decimal(str(material_price))
-    outer = Decimal(str(d_mm)) + 100
-    per_sheet = (Decimal(7_000_000) / (outer + 159) ** 2).quantize(Decimal(1), rounding=ROUND_HALF_UP)
+    per_sheet = (Decimal(7_000_000) / (Decimal(str(d_mm)) + 159) ** 2).quantize(Decimal(1), rounding=ROUND_HALF_UP)
     if per_sheet == 0:
         return None
     return (sheet_price / per_sheet * Decimal("1.6")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
