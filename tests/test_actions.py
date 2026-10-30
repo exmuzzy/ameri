@@ -1102,7 +1102,7 @@ def real_duct_calc(monkeypatch):
 def test_round_flange_not_in_price_list_uses_sheet_price(real_duct_calc, tmp_path):
     """Только круглый размер не из прайса меняет цену; прайс и прямоугольник — как у прототипа.
 
-    Толщина фланца — всегда по таблице фланцев, толщина стенки позиции на неё не влияет.
+    Толщина стенки позиции на фланец не влияет.
     """
 
     from decimal import Decimal
@@ -1133,7 +1133,7 @@ def test_round_flange_not_in_price_list_uses_sheet_price(real_duct_calc, tmp_pat
     assert price(d370).source == "calculated"
     assert flange_cost([d370] * 4) == Decimal("1271.80")  # 4 конца — 2 пары
     assert actions.connection_unit_cost("flange", "round", (370,)) == Decimal("317.95")
-    # Толщина стенки отвода (3 мм от модели или из строки) не делает фланец тоньше: он по таблице фланцев, 6 мм.
+    # Толщина стенки отвода (3 мм от модели или из строки) не делает фланец тоньше: он 6 мм.
     assert price(d370, explicit_flange_thickness_mm=3) == price(d370)
     assert flange_cost([d370] * 2, explicit_flange_thickness_mm=3) == Decimal("635.90")
 
@@ -1151,6 +1151,13 @@ def test_round_flange_not_in_price_list_uses_sheet_price(real_duct_calc, tmp_pat
     assert [flange_thickness(d_mm=d) for d in (400, 420, 449, 450, 800, 1000)] == [6, 6, 6, 8, 10, 12]
     assert flange_thickness(a_mm=420, b_mm=300) == 6
     assert price(ConnectionEnd.round(420, "flange")).price == 2 * actions.round_flange_price(420, 6, 200)
+
+    # Круглый фланец не из прайса — толщиной как в прайсе шаблона: до 800 мм — 6, от 800 — 8,
+    # а не 8/10/12 мм по таблице: иначе ⌀600 выходил дороже ⌀630 из прайса.
+    assert [actions.round_flange_sheet_thickness(d) for d in (370, 600, 799, 800, 850, 1100)] == [6, 6, 6, 8, 8, 8]
+    assert price(ConnectionEnd.round(600, "flange")).price == Decimal("1324.80")  # 12 с листа, 6 мм
+    assert price(ConnectionEnd.round(1100, "flange")).price == Decimal("5299.20")  # 4 с листа, 8 мм
+    assert price(ConnectionEnd.round(850, "flange")).price == 2 * actions.round_flange_price(850, 8, 200)
 
 
 def test_himvent_line_is_counted_as_named_element(real_duct_calc):

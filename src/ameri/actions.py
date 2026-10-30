@@ -1192,6 +1192,16 @@ def round_flange_price(d_mm, thickness_mm, material_price) -> Decimal | None:
     return (sheet_price / per_sheet * Decimal("1.6")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def round_flange_sheet_thickness(d_mm) -> Decimal:
+    """Толщина листа для круглого фланца не из прайса — как в прайсе шаблона (лист «фланцы»).
+
+    Там ⌀110–740 — 6 мм, ⌀800–1270 — 8 мм; таблица толщин прототипа (8/10/12 мм) сделала бы
+    фланец дороже соседних размеров из прайса.
+    """
+
+    return Decimal(6) if Decimal(str(d_mm)) < 800 else Decimal(8)
+
+
 def template_material_price(template: Path) -> Decimal | None:
     """Цена материала за кг из шаблона расчётки — та же ячейка, что прототип пишет в колонку J."""
 
@@ -1218,9 +1228,9 @@ def template_material_price(template: Path) -> Decimal | None:
 def _install_flange_price(material_price: Decimal) -> None:
     """Решения руководителя по фланцам, остальное считает прототип.
 
-    Круглый фланец не из прайса — по цене листа. Толщина фланца — только по таблице фланцев:
-    толщина стенки из спецификации или от модели на фланец не переносится. Фланцы 401–449 мм — 6 мм,
-    как до 400: в таблице прототипа этих размеров нет.
+    Круглый фланец не из прайса — по цене листа, толщиной как в прайсе шаблона. Прямоугольный — по таблице
+    толщин фланцев; фланцы 401–449 мм — 6 мм, как до 400: в таблице прототипа этих размеров нет.
+    Толщина стенки из спецификации или от модели на фланец не переносится.
     """
 
     from duct_calc import flanges, thickness
@@ -1237,7 +1247,7 @@ def _install_flange_price(material_price: Decimal) -> None:
         if end.kind != "round" or end.dimensions[0] in self.round_prices:
             return original(self, end)
         d = end.dimensions[0]
-        one = round_flange_price(d, flanges.flange_thickness(d_mm=d), material_price)
+        one = round_flange_price(d, round_flange_sheet_thickness(d), material_price)
         if one is None:
             return original(self, end)
         return flanges.PairPrice(one * 2, "calculated", f"{d.normalize():f}")
