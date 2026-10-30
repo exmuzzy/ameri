@@ -1143,6 +1143,13 @@ def test_round_flange_not_in_price_list_uses_sheet_price(real_duct_calc, tmp_pat
     )  # у прототипа толщина стенки меняла цену прямоугольного фланца не из прайса
     assert price(ConnectionEnd.round(355, "flange")).source == "table"
 
+    # Фланцы 401–449 мм — 6 мм, как до 400; раньше таблица прототипа на них останавливалась с вопросом.
+    from duct_calc.thickness import flange_thickness
+
+    assert [flange_thickness(d_mm=d) for d in (400, 420, 449, 450, 800, 1000)] == [6, 6, 6, 8, 10, 12]
+    assert flange_thickness(a_mm=420, b_mm=300) == 6
+    assert price(ConnectionEnd.round(420, "flange")).price == 2 * actions.round_flange_price(420, 6, 200)
+
 
 def test_himvent_line_is_counted_as_named_element(real_duct_calc):
     """«ХИМВЕНТ» в строке не делает элемент покупным; покупные слова и голый код — по-прежнему без расчёта."""

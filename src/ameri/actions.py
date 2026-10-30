@@ -1219,10 +1219,16 @@ def _install_flange_price(material_price: Decimal) -> None:
     """Решения руководителя по фланцам, остальное считает прототип.
 
     Круглый фланец не из прайса — по цене листа. Толщина фланца — только по таблице фланцев:
-    толщина стенки из спецификации или от модели на фланец не переносится.
+    толщина стенки из спецификации или от модели на фланец не переносится. Фланцы 401–449 мм — 6 мм,
+    как до 400: в таблице прототипа этих размеров нет.
     """
 
-    from duct_calc import flanges
+    from duct_calc import flanges, thickness
+
+    wall = getattr(thickness, "_ameri_original_flange_wall", None) or thickness.FLANGE_WALL
+    thickness._ameri_original_flange_wall = wall
+    # Границы включительные, из совпавших строк берётся большая толщина: ровно 450 мм остаётся 8 мм.
+    thickness.FLANGE_WALL = (replace(wall[0], end=Decimal(450)), *wall[1:])
 
     original = getattr(flanges, "_ameri_original_pair_price", None) or flanges.FlangePriceBook.pair_price
     flanges._ameri_original_pair_price = original
