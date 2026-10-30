@@ -691,6 +691,22 @@ def test_himvent_and_lone_connection_are_read_from_the_line():
     assert actions.is_himvent_duct("Отвод 90-ПП-110-3-ММ ХИМВЕНТ")
     assert actions.is_himvent_duct("Переход ХИМВЕНТ-ПП-250/200-3-ММ")
     assert actions.is_himvent_duct("Прямой участок ХИМВЕНТ ф250")
+    # Любой элемент вентиляции, который считает расчётка, — не только воздуховод и фасонные изделия.
+    for line in (
+        "Шибер ХИМВЕНТ ф250",
+        "Заслонка шиберная ХИМВЕНТ 400х200",
+        "Клапан обратный ХИМВЕНТ ф315",
+        "Дроссель-клапан ХИМВЕНТ ф200",
+        "Врезка ХИМВЕНТ 400/160",
+        "Решётка ХИМВЕНТ ф250",
+        "Сетка защитная ХИМВЕНТ ф250",
+        "Шумоглушитель ХИМВЕНТ ф400",
+        "Ниппель ХИМВЕНТ ф200",
+        "Муфта ХИМВЕНТ ф160",
+        "Фланец ХИМВЕНТ ф355",
+        "Раструб ХИМВЕНТ ф315",
+    ):
+        assert actions.is_himvent_duct(line), line
     assert not actions.is_himvent_duct("ХИМВЕНТ-Н-О-1130-ПП-БС-У2-30/1000-ПО")
     assert not actions.is_himvent_duct("Вентилятор ХИМВЕНТ-Н-К-О-225")
     assert not actions.is_himvent_duct("Скруббер ХИМВЕНТ")
@@ -1041,3 +1057,107 @@ def test_only_first_sheet_goes_to_calc_and_preview(tmp_path):
     assert actions.spec_lines_text(path).splitlines() == ["1. Шибер ф250 — 2 шт; кол-во: 2"]
     rows = actions._xlsx_rows(path)
     assert rows[1][:2] == ["Шибер ф250", "2"]
+
+
+def test_round_flange_price_from_sheet_by_outer_edge():
+    """Круглый фланец не из прайса: лист 4,5 м², число фланцев с листа — по наружному краю (⌀ + 100).
+
+    Цена материала здесь условная (200 ₽/кг), цена компании — только в шаблоне расчётки.
+    """
+
+    from decimal import Decimal
+
+    # ⌀370: 7 000 000 / 629² = 17,69 → 18 с листа (с округлением вниз было бы 17 и 467,58).
+    assert actions.round_flange_price(370, 6, 200) == Decimal("441.60")
+    # ⌀1100, фланец 12 мм: 7 000 000 / 1359² = 3,79 → 4 с листа.
+    assert actions.round_flange_price(1100, 12, 200) == Decimal("3974.40")
+    # Толщина и цена материала входят в цену листа прямо пропорционально.
+    assert actions.round_flange_price(370, 8, 200) == Decimal("588.80")
+    assert actions.round_flange_price(370, 6, 100) == Decimal("220.80")
+    # С листа не выходит ни одного фланца — новой формулой не считается.
+    assert actions.round_flange_price(4000, 12, 200) is None
+
+
+DUCT_CALC_SRC = Path(__file__).resolve().parents[1] / "duct-calc" / "src"
+
+
+@pytest.fixture
+def real_duct_calc(monkeypatch):
+    """Настоящий прототип duct-calc из соседней папки; в публичном репозитории его нет — тест пропускается."""
+
+    import sys
+
+    if not (DUCT_CALC_SRC / "duct_calc" / "flanges.py").is_file():
+        pytest.skip("нет прототипа duct-calc")
+    for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.setattr(sys, "path", [str(DUCT_CALC_SRC), *sys.path])
+    yield
+    for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
+        del sys.modules[name]
+
+
+def test_round_flange_not_in_price_list_uses_sheet_price(real_duct_calc, tmp_path):
+    """Только круглый размер не из прайса меняет цену; прайс, прямоугольник и раструб — как у прототипа."""
+
+    from decimal import Decimal
+
+    import openpyxl
+    from duct_calc.flanges import DEFAULT_PRICE_BOOK, ConnectionEnd, flange_cost
+    from duct_calc.xlsx_out import MATERIAL_PRICE_CELL, SHEET_NAME
+
+    book = openpyxl.Workbook()
+    book.active.title = SHEET_NAME
+    book.active[MATERIAL_PRICE_CELL] = 200
+    template = tmp_path / "шаблон.xlsx"
+    book.save(template)
+    assert actions.template_material_price(template) == Decimal("200")
+    assert actions.template_material_price(tmp_path / "нет.xlsx") is None
+
+    from duct_calc import flanges
+
+    original = flanges.FlangePriceBook.pair_price
+    actions._install_flange_price(Decimal("200"))
+    actions._install_flange_price(Decimal("200"))  # повторная установка не оборачивает обёртку
+
+    def price(end, **kwargs):
+        return DEFAULT_PRICE_BOOK.pair_price(end, **kwargs)
+
+    d370 = ConnectionEnd.round(370, "flange")
+    assert price(d370).price == Decimal("883.20")  # пара = 2 × 441,60
+    assert price(d370).source == "calculated"
+    assert price(d370, explicit_flange_thickness_mm=8).price == Decimal("1177.60")
+    assert price(d370, explicit_flange_thickness_mm=8).used_spec_thickness
+    assert flange_cost([d370] * 4) == Decimal("1766.40")  # 4 конца — 2 пары
+    assert actions.connection_unit_cost("flange", "round", (370,)) == Decimal("441.60")
+
+    for end in (ConnectionEnd.round(355, "flange"), ConnectionEnd.rect(550, 350, "flange"), ConnectionEnd.rect(600, 300, "flange")):
+        assert price(end) == original(DEFAULT_PRICE_BOOK, end), end
+    assert price(ConnectionEnd.round(355, "flange")).source == "table"
+
+
+def test_himvent_line_is_counted_as_named_element(real_duct_calc):
+    """«ХИМВЕНТ» в строке не делает элемент покупным; покупные слова и голый код — по-прежнему без расчёта."""
+
+    actions._install_harness(HARNESS)
+    from duct_calc import pipeline
+
+    for line in (
+        "Шибер ХИМВЕНТ ф250",
+        "Клапан обратный ХИМВЕНТ ф315",
+        "Врезка ХИМВЕНТ 400/160",
+        "Решётка ХИМВЕНТ ф250",
+        "Шумоглушитель ХИМВЕНТ ф400",
+        "Ниппель ХИМВЕНТ ф200",
+        "Муфта ХИМВЕНТ ф160",
+        "Фланец ХИМВЕНТ ф355",
+        "Воздуховод аналог ХИМВЕНТ ø250 L1500",
+    ):
+        assert not pipeline._is_scrubber_text(line), line
+    for line in (
+        "ХИМВЕНТ-ВО-250",
+        "Вентилятор ХИМВЕНТ ВР-80 с фланцем",
+        "Клапан КВР ХИМВЕНТ 300",
+        "Скруббер ХИМВЕНТ",
+    ):
+        assert pipeline._is_scrubber_text(line), line

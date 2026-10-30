@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 import httpx
 import yaml
 from dataclasses import dataclass, field, is_dataclass, replace
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from .llm import DEEPSEEK_TIMEOUT, NO_CONNECTION_MESSAGE, DeepSeekChat, key_problem
@@ -647,7 +648,8 @@ def _plain_item_text(source_text: str) -> str:
 
 # «ХИМВЕНТ» само по себе — без формулы. Рядом с названием элемента строка считается.
 _HIMVENT_DUCT_RE = re.compile(
-    r"воздуховод|прям\w*\s+участ|прямик|отвод|колен|переход|тройник|заглуш|утк|зонт|дефлектор",
+    r"воздуховод|прям\w*\s+участ|прямик|отвод|колен|переход|тройник|заглуш|утк|зонт|дефлектор"
+    r"|шибер|заслонк|клапан|дроссел|врезк|решетк|сетк|шумоглуш|глушител|ниппел|муфт|фланец|фланц|раструб",
     re.IGNORECASE,
 )
 _LONE_CONNECTION_FILLER = frozenset(
@@ -1176,6 +1178,69 @@ def _install_catalog_line_rules(pipeline) -> None:
         pipeline._item_head = lambda source_text: original_head(item_name(source_text))
 
 
+def round_flange_price(d_mm, thickness_mm, material_price) -> Decimal | None:
+    """Цена одного круглого фланца не из прайса: с листа 4,5 м², по наружному краю фланца (сечение + 100 мм).
+
+    None — если с листа не выходит ни одного фланца.
+    """
+
+    sheet_price = Decimal(str(thickness_mm)) * Decimal("4.5") * Decimal("0.92") * Decimal(str(material_price))
+    outer = Decimal(str(d_mm)) + 100
+    per_sheet = (Decimal(7_000_000) / (outer + 159) ** 2).quantize(Decimal(1), rounding=ROUND_HALF_UP)
+    if per_sheet == 0:
+        return None
+    return (sheet_price / per_sheet * Decimal("1.6")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def template_material_price(template: Path) -> Decimal | None:
+    """Цена материала за кг из шаблона расчётки — та же ячейка, что прототип пишет в колонку J."""
+
+    if not template.is_file():
+        return None
+    from openpyxl import load_workbook
+    from duct_calc.xlsx_out import MATERIAL_PRICE_CELL, SHEET_NAME
+
+    try:
+        workbook = load_workbook(template, read_only=True, data_only=True)
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile):
+        return None
+    try:
+        if SHEET_NAME not in workbook.sheetnames:
+            return None
+        value = workbook[SHEET_NAME][MATERIAL_PRICE_CELL].value
+    finally:
+        workbook.close()
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return Decimal(str(value))
+
+
+def _install_flange_price(material_price: Decimal) -> None:
+    """Круглый фланец не из прайса — по цене листа (решение руководителя), остальное считает прототип."""
+
+    from duct_calc import flanges
+
+    original = getattr(flanges, "_ameri_original_pair_price", None) or flanges.FlangePriceBook.pair_price
+    flanges._ameri_original_pair_price = original
+
+    def pair_price(self, end, *, explicit_flange_thickness_mm=None):
+        if end.kind != "round" or end.dimensions[0] in self.round_prices:
+            return original(self, end, explicit_flange_thickness_mm=explicit_flange_thickness_mm)
+        d = end.dimensions[0]
+        thickness = flanges.flange_thickness(d_mm=d, explicit_mm=explicit_flange_thickness_mm)
+        one = round_flange_price(d, thickness, material_price)
+        if one is None:
+            return original(self, end, explicit_flange_thickness_mm=explicit_flange_thickness_mm)
+        return flanges.PairPrice(
+            one * 2,
+            "calculated",
+            f"{d.normalize():f}",
+            used_spec_thickness=explicit_flange_thickness_mm is not None,
+        )
+
+    flanges.FlangePriceBook.pair_price = pair_price
+
+
 def _install_decisions(pipeline) -> None:
     """Q38 и Q39 поверх прототипа: оборачиваем его функции, исходные сохраняем для повторной установки.
 
@@ -1306,6 +1371,10 @@ def duct_calc(
     with tempfile.TemporaryDirectory() as tmp:
         output = Path(tmp) / f"расчетка_{spec.path.stem}.xlsx"
         template = duct_calc_dir / "data" / DUCT_TEMPLATE_NAME
+        material_price = template_material_price(template)
+        if material_price is not None:
+            # Без числа в шаблоне прототип сам остановится с понятной ошибкой.
+            _install_flange_price(material_price)
         connection = CONNECTION_TYPES[connection_label]
 
         def run_lines() -> tuple[object, str]:
