@@ -1098,7 +1098,10 @@ def real_duct_calc(monkeypatch):
 
 
 def test_round_flange_not_in_price_list_uses_sheet_price(real_duct_calc, tmp_path):
-    """Только круглый размер не из прайса меняет цену; прайс, прямоугольник и раструб — как у прототипа."""
+    """Только круглый размер не из прайса меняет цену; прайс и прямоугольник — как у прототипа.
+
+    Толщина фланца — всегда по таблице фланцев, толщина стенки позиции на неё не влияет.
+    """
 
     from decimal import Decimal
 
@@ -1126,13 +1129,18 @@ def test_round_flange_not_in_price_list_uses_sheet_price(real_duct_calc, tmp_pat
     d370 = ConnectionEnd.round(370, "flange")
     assert price(d370).price == Decimal("883.20")  # пара = 2 × 441,60
     assert price(d370).source == "calculated"
-    assert price(d370, explicit_flange_thickness_mm=8).price == Decimal("1177.60")
-    assert price(d370, explicit_flange_thickness_mm=8).used_spec_thickness
     assert flange_cost([d370] * 4) == Decimal("1766.40")  # 4 конца — 2 пары
     assert actions.connection_unit_cost("flange", "round", (370,)) == Decimal("441.60")
+    # Толщина стенки отвода (3 мм от модели или из строки) не делает фланец тоньше: он по таблице фланцев, 6 мм.
+    assert price(d370, explicit_flange_thickness_mm=3) == price(d370)
+    assert flange_cost([d370] * 2, explicit_flange_thickness_mm=3) == Decimal("883.20")
 
     for end in (ConnectionEnd.round(355, "flange"), ConnectionEnd.rect(550, 350, "flange"), ConnectionEnd.rect(600, 300, "flange")):
         assert price(end) == original(DEFAULT_PRICE_BOOK, end), end
+        assert price(end, explicit_flange_thickness_mm=3) == original(DEFAULT_PRICE_BOOK, end), end
+    assert original(DEFAULT_PRICE_BOOK, ConnectionEnd.rect(550, 350, "flange"), explicit_flange_thickness_mm=3) != (
+        price(ConnectionEnd.rect(550, 350, "flange"))
+    )  # у прототипа толщина стенки меняла цену прямоугольного фланца не из прайса
     assert price(ConnectionEnd.round(355, "flange")).source == "table"
 
 

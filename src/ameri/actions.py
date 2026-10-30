@@ -1216,7 +1216,11 @@ def template_material_price(template: Path) -> Decimal | None:
 
 
 def _install_flange_price(material_price: Decimal) -> None:
-    """Круглый фланец не из прайса — по цене листа (решение руководителя), остальное считает прототип."""
+    """Решения руководителя по фланцам, остальное считает прототип.
+
+    Круглый фланец не из прайса — по цене листа. Толщина фланца — только по таблице фланцев:
+    толщина стенки из спецификации или от модели на фланец не переносится.
+    """
 
     from duct_calc import flanges
 
@@ -1225,18 +1229,12 @@ def _install_flange_price(material_price: Decimal) -> None:
 
     def pair_price(self, end, *, explicit_flange_thickness_mm=None):
         if end.kind != "round" or end.dimensions[0] in self.round_prices:
-            return original(self, end, explicit_flange_thickness_mm=explicit_flange_thickness_mm)
+            return original(self, end)
         d = end.dimensions[0]
-        thickness = flanges.flange_thickness(d_mm=d, explicit_mm=explicit_flange_thickness_mm)
-        one = round_flange_price(d, thickness, material_price)
+        one = round_flange_price(d, flanges.flange_thickness(d_mm=d), material_price)
         if one is None:
-            return original(self, end, explicit_flange_thickness_mm=explicit_flange_thickness_mm)
-        return flanges.PairPrice(
-            one * 2,
-            "calculated",
-            f"{d.normalize():f}",
-            used_spec_thickness=explicit_flange_thickness_mm is not None,
-        )
+            return original(self, end)
+        return flanges.PairPrice(one * 2, "calculated", f"{d.normalize():f}")
 
     flanges.FlangePriceBook.pair_price = pair_price
 
