@@ -688,6 +688,8 @@ _SYSTEM_MARK_RE = re.compile(r"\bсистема\s+([^,\n;]+)", re.IGNORECASE)
 # Прототип duct-calc для .xlsx пишет «ИмяЛиста\\tстрока». Заметка нарезки метража — суффикс после « — ».
 _SYSTEM_TAIL_RE = re.compile(r";\s*система\s+[^;\n]+", re.IGNORECASE)
 _SEGMENT_NOTE_RE = re.compile(r"\s+—\s+(?:отрезки по |остаток ).*$", re.IGNORECASE)
+# Хвост, который дописывает spec_lines_text: количество и так в своей колонке.
+_QTY_TAIL_RE = re.compile(r";\s*кол-во:\s*\d+(?:[.,]\d+)?(?=\s*(?:;|$))", re.IGNORECASE)
 
 
 def is_himvent_duct(source_text: str) -> bool:
@@ -829,6 +831,8 @@ def split_system_nomenclature(text: str, existing: str | None = None) -> tuple[s
     """
 
     raw = _plain_item_text(text).strip()
+    # Прототип читает систему до «;», и у отрезка без «; кол-во» в неё попадает « — отрезки по …».
+    existing = _SEGMENT_NOTE_RE.sub("", existing) if existing else existing
     if not raw:
         return (_allowed_system(existing), raw)
     system = _allowed_system(existing)
@@ -849,7 +853,7 @@ def split_system_nomenclature(text: str, existing: str | None = None) -> tuple[s
     else:
         if not system:
             system = _allowed_system(_system_label_from_text(body))
-        name = _SYSTEM_TAIL_RE.sub("", body).strip(" ;") or body
+        name = _QTY_TAIL_RE.sub("", _SYSTEM_TAIL_RE.sub("", body)).strip(" ;") or body
     if note and note.strip() not in name:
         name = name.rstrip() + note
     return _allowed_system(system), _excel_plain_text(name)
@@ -1272,11 +1276,106 @@ def _install_decisions(pipeline) -> None:
     )
 
 
+_LINE_NO_RE = re.compile(r"^\s*\d+[.)]\s*")
+_DROPPED_SYSTEM_RE = re.compile(r";\s*система\s", re.IGNORECASE)
+_CHUNK_BLOCK_RE = re.compile(r"^source_no=(\S+); source=[^\n]*\n(.*?)(?=\n\nsource_no=|\Z)", re.MULTILINE | re.DOTALL)
+
+
+def restored_source_text(model_text: str, source_line: str) -> str | None:
+    """Исходная строка вместо обрезка от модели, если модель отбросила хвост с «; система …».
+
+    Модель обрезает и перед количеством («— 1 шт.; система …»): тогда возвращается и оно.
+    None — если обрезка не было или модель изменила текст: тогда остаётся её строка.
+    """
+
+    model = " ".join(model_text.split())
+    line = " ".join(_LINE_NO_RE.sub("", source_line).split())
+    if not model or model == line or not line.startswith(model):
+        return None
+    return line if _DROPPED_SYSTEM_RE.search(line[len(model) :]) else None
+
+
+def _install_source_line_restore(pipeline) -> None:
+    """Система не теряется, когда модель укорачивает строку позиции, и есть в красных строках.
+
+    Для пронумерованных строк прототип берёт текст позиции из ответа модели, а система в колонке A
+    читается только из этого текста. Строку «(проблема: …)» прототип пишет без колонки «Система».
+    """
+
+    if hasattr(pipeline, "_problem_output_row"):
+        problem_row = getattr(pipeline, "_ameri_original_problem_row", None) or pipeline._problem_output_row
+        pipeline._ameri_original_problem_row = problem_row
+        pipeline._problem_output_row = lambda item, reason: with_system_column(problem_row(item, reason))
+
+    if not hasattr(pipeline, "stitch_model_chunks"):
+        return
+    original = getattr(pipeline, "_ameri_original_stitch", None) or pipeline.stitch_model_chunks
+    pipeline._ameri_original_stitch = original
+
+    def stitch_model_chunks(client, *, chunks, **kwargs):
+        result = original(client, chunks=chunks, **kwargs)
+        lines = {no: text for chunk in chunks for no, text in _CHUNK_BLOCK_RE.findall(chunk.text)}
+        positions = []
+        for position in result.response.positions:
+            line = lines.get(str(position.source_no))
+            restored = restored_source_text(position.source_text, line) if line else None
+            positions.append(_with_source_text(position, restored) if restored else position)
+        return replace(result, response=replace(result.response, positions=tuple(positions)))
+
+    pipeline.stitch_model_chunks = stitch_model_chunks
+
+
+# Диаметр в записи тройника: «ø200», «ф250», «560». Число перед «гр», «°», «шт», «м» — угол или количество.
+_TEE_D = r"(?:[øØ⌀∅фФdD]\s*)?(\d{2,4})(?![\d.,]*\s*(?:°|гр|град|шт|мп|м\.|м\b))"
+_TEE_DIAMETERS_RE = re.compile(rf"{_TEE_D}(?:\s*(?:-{{1,2}}|–|/)\s*{_TEE_D}){{1,2}}", re.IGNORECASE)
+
+
+def round_tee_diameters(source_text: str) -> tuple[float, float] | None:
+    """Магистраль и ответвление круглого тройника из строки: ответвление — меньший диаметр.
+
+    «ø200-ø200-ø150», «315--250--315», «ф250/ф160»; при трёх разных диаметрах магистраль — больший.
+    None — если в строке нет двух-трёх диаметров подряд.
+    """
+
+    text = _QTY_TAIL_RE.sub("", _SYSTEM_TAIL_RE.sub("", _plain_item_text(source_text)))
+    match = _TEE_DIAMETERS_RE.search(text)
+    if match is None:
+        return None
+    diameters = [float(value) for value in re.findall(_TEE_D, match.group(0), re.IGNORECASE)]
+    return max(diameters), min(diameters)
+
+
+def round_tee_from_text(position):
+    """Размеры круглого тройника — из строки, а не от модели: в длинной части она путает ответвление с магистралью."""
+
+    if getattr(position, "element_type", None) != "tee_round_round":
+        return position
+    diameters = round_tee_diameters(getattr(position, "source_text", "") or "")
+    if diameters is None:
+        return position
+    main, branch = diameters
+    if position.size.get("d") == main and position.size.get("branch_d") == branch:
+        return position
+    questions = tuple(q for q in position.questions if q.code not in {"missing_size_d", "missing_size_branch_d"})
+    return replace(position, size={**position.size, "d": main, "branch_d": branch}, questions=questions)
+
+
+def _install_tee_branch(pipeline) -> None:
+    """Круглый тройник: ответвление — меньший диаметр из строки; длину потом ставит прототип (врезка + 300)."""
+
+    if not hasattr(pipeline, "with_standard_tee_equal_branch"):
+        return
+    original = getattr(pipeline, "_ameri_original_tee_equal_branch", None) or pipeline.with_standard_tee_equal_branch
+    pipeline._ameri_original_tee_equal_branch = original
+    pipeline.with_standard_tee_equal_branch = lambda position: original(round_tee_from_text(position))
+
+
 def _install_harness(harness_dir: Path | None) -> None:
     """Подключить Харнес к прототипу duct-calc: правила разбора, ключевые слова, решения Q38 и Q39.
 
     Поверх прототипа: ХИМВЕНТ на названном элементе считается, отдельный фланец или раструб
-    попадает в стоимость соединения.
+    попадает в стоимость соединения, система из строки не теряется, если модель её отбросила,
+    ответвление круглого тройника — меньший диаметр из строки.
     """
 
     from duct_calc import pipeline
@@ -1284,6 +1383,8 @@ def _install_harness(harness_dir: Path | None) -> None:
     _install_decisions(pipeline)
     _install_coupling_as_socket(pipeline)
     _install_catalog_line_rules(pipeline)
+    _install_source_line_restore(pipeline)
+    _install_tee_branch(pipeline)
 
     original = getattr(pipeline, "_ameri_original_prompt", None) or pipeline.build_system_prompt
     pipeline._ameri_original_prompt = original
