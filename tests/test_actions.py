@@ -923,13 +923,19 @@ def test_split_system_nomenclature_moves_sheet_name_out_of_item():
         "1. Воздуховод ПП ∅400 δ=4 — 14 мп; система В1; кол-во: 14"
     )
     assert system == "В1"
-    assert name == "1. Воздуховод ПП ∅400 δ=4 — 14 мп; кол-во: 14"
+    assert name == "1. Воздуховод ПП ∅400 δ=4 — 14 мп"  # «; кол-во» — служебный хвост, количество в своей колонке
 
     system, name = actions.split_system_nomenclature(
         "1. Отвод 90 ф315; система цниим.xlsx; кол-во: 8"
     )
     assert system is None
-    assert name == "1. Отвод 90 ф315; кол-во: 8"
+    assert name == "1. Отвод 90 ф315"
+
+    # Отрезок воздуховода: пометка о нарезке остаётся в номенклатуре, но не в системе.
+    system, name = actions.split_system_nomenclature(
+        "Воздуховод ø150 — 54.8 м.; система Во 1.1 — отрезки по 1500 мм", existing="Во 1.1 — отрезки по 1500 мм"
+    )
+    assert (system, name) == ("Во 1.1", "Воздуховод ø150 — 54.8 м. — отрезки по 1500 мм")
 
     system, name = actions.split_system_nomenclature("Отвод 90 ф315 фланец", existing="П1")
     assert system == "П1"
@@ -1185,3 +1191,61 @@ def test_himvent_line_is_counted_as_named_element(real_duct_calc):
         "Скруббер ХИМВЕНТ",
     ):
         assert pipeline._is_scrubber_text(line), line
+
+
+def test_source_line_is_restored_only_when_model_dropped_system():
+    """Хвост «; система …» возвращается, только если модель вернула точное начало строки."""
+
+    line = "24. Отвод из полипропилена ø350-ø350, толщ. 4,0 мм — 9 шт.; система Во 1.1; кол-во: 9"
+    full = "Отвод из полипропилена ø350-ø350, толщ. 4,0 мм — 9 шт.; система Во 1.1; кол-во: 9"
+    assert actions.restored_source_text("Отвод из полипропилена ø350-ø350, толщ. 4,0 мм — 9 шт.", line) == full
+    assert actions.restored_source_text("Отвод из полипропилена  ø350-ø350, толщ. 4,0 мм — 9 шт", line) == full
+    assert actions.restored_source_text(full, line) is None
+    # Обрезано перед количеством — возвращается и количество.
+    assert actions.restored_source_text("Отвод из полипропилена ø350-ø350, толщ. 4,0 мм", line) == full
+    # Модель изменила текст — её строку не трогаем.
+    assert actions.restored_source_text("Отвод ø350, 9 шт.", line) is None
+    # В отброшенном нет системы — тоже не трогаем: так таблицы с колонкой «№» остаются как у прототипа.
+    assert actions.restored_source_text("1 Воздуховод ø200", "1 Воздуховод ø200 L=1500 мм") is None
+
+
+def test_system_survives_model_dropping_it_from_numbered_line(real_duct_calc, tmp_path):
+    """Модель вернула строку без «; система Во 1.1» — в колонку «Система» система всё равно попадает."""
+
+    actions._install_harness(None)
+    actions._install_harness(None)  # повторная установка не оборачивает обёртку
+    from duct_calc import pipeline
+
+    lines = [
+        "1. Отвод из полипропилена ø350-ø350, толщ. 4,0 мм — 9 шт.; система Во 1.1; кол-во: 9",
+        "2. Воздуховод из полипропилена ø150, толщ. 3,0 мм — 54.8 м.; система П 2; кол-во: 54.8",
+        "3. Заглушка из полипропилена ø300, толщ. 4,0 мм — 1 шт.; система В 3; кол-во: 1",
+    ]
+    source = tmp_path / "строки.md"
+    source.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    model_texts = {
+        "1": "Отвод из полипропилена ø350-ø350, толщ. 4,0 мм — 9 шт.",
+        "2": "Воздуховод из полипропилена ø150, толщ. 3,0 мм — 54.8 м.; система П 2; кол-во: 54.8",
+        "3": "Заглушка из полипропилена ø300, толщ. 4,0 мм",
+    }
+
+    class Client:
+        def complete_json(self, system_prompt, user_text):
+            return {
+                "positions": [
+                    {"source_no": no, "source_text": text, "element_type": None, "qty": 1, "size": {}, "ends": []}
+                    for no, text in model_texts.items()
+                ]
+            }
+
+    preview = pipeline.preview_specification(source_path=source, connection_type="flange", model_client=Client())
+    systems = {
+        str(p.source_no): actions.split_system_nomenclature(p.source_text)[0] for p in preview.positions
+    }
+    assert systems == {"1": "Во 1.1", "2": "П 2", "3": "В 3"}
+
+    # Красная строка «(проблема: …)»: система — в колонке «Система», а не в номенклатуре.
+    item = next(p for p in preview.positions if str(p.source_no) == "1")
+    row = pipeline._problem_output_row(item, "не указан размер angle")
+    assert (row.system, row.nomenclature) == ("Во 1.1", "Отвод из полипропилена ø350-ø350, толщ. 4,0 мм — 9 шт.")
+    assert row.quantity == 9
