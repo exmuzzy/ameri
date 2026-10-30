@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 import httpx
 import yaml
 from dataclasses import dataclass, field, is_dataclass, replace
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from .llm import DEEPSEEK_TIMEOUT, NO_CONNECTION_MESSAGE, DeepSeekChat, key_problem
@@ -647,7 +648,8 @@ def _plain_item_text(source_text: str) -> str:
 
 # «ХИМВЕНТ» само по себе — без формулы. Рядом с названием элемента строка считается.
 _HIMVENT_DUCT_RE = re.compile(
-    r"воздуховод|прям\w*\s+участ|прямик|отвод|колен|переход|тройник|заглуш|утк|зонт|дефлектор",
+    r"воздуховод|прям\w*\s+участ|прямик|отвод|колен|переход|тройник|заглуш|утк|зонт|дефлектор"
+    r"|шибер|заслонк|клапан|дроссел|врезк|решетк|сетк|шумоглуш|глушител|ниппел|муфт|фланец|фланц|раструб",
     re.IGNORECASE,
 )
 _LONE_CONNECTION_FILLER = frozenset(
@@ -1176,6 +1178,83 @@ def _install_catalog_line_rules(pipeline) -> None:
         pipeline._item_head = lambda source_text: original_head(item_name(source_text))
 
 
+def round_flange_price(d_mm, thickness_mm, material_price) -> Decimal | None:
+    """Цена одного круглого фланца не из прайса: с листа 4,5 м², по диаметру фланца (+159 мм — полка и отход).
+
+    С диаметром фланца формула повторяет число фланцев с листа из прайса шаблона (⌀110–650).
+    None — если с листа не выходит ни одного фланца.
+    """
+
+    sheet_price = Decimal(str(thickness_mm)) * Decimal("4.5") * Decimal("0.92") * Decimal(str(material_price))
+    per_sheet = (Decimal(7_000_000) / (Decimal(str(d_mm)) + 159) ** 2).quantize(Decimal(1), rounding=ROUND_HALF_UP)
+    if per_sheet == 0:
+        return None
+    return (sheet_price / per_sheet * Decimal("1.6")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def round_flange_sheet_thickness(d_mm) -> Decimal:
+    """Толщина листа для круглого фланца не из прайса — как в прайсе шаблона (лист «фланцы»).
+
+    Там ⌀110–740 — 6 мм, ⌀800–1270 — 8 мм; таблица толщин прототипа (8/10/12 мм) сделала бы
+    фланец дороже соседних размеров из прайса.
+    """
+
+    return Decimal(6) if Decimal(str(d_mm)) < 800 else Decimal(8)
+
+
+def template_material_price(template: Path) -> Decimal | None:
+    """Цена материала за кг из шаблона расчётки — та же ячейка, что прототип пишет в колонку J."""
+
+    if not template.is_file():
+        return None
+    from openpyxl import load_workbook
+    from duct_calc.xlsx_out import MATERIAL_PRICE_CELL, SHEET_NAME
+
+    try:
+        workbook = load_workbook(template, read_only=True, data_only=True)
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile):
+        return None
+    try:
+        if SHEET_NAME not in workbook.sheetnames:
+            return None
+        value = workbook[SHEET_NAME][MATERIAL_PRICE_CELL].value
+    finally:
+        workbook.close()
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return Decimal(str(value))
+
+
+def _install_flange_price(material_price: Decimal) -> None:
+    """Решения руководителя по фланцам, остальное считает прототип.
+
+    Круглый фланец не из прайса — по цене листа, толщиной как в прайсе шаблона. Прямоугольный — по таблице
+    толщин фланцев; фланцы 401–449 мм — 6 мм, как до 400: в таблице прототипа этих размеров нет.
+    Толщина стенки из спецификации или от модели на фланец не переносится.
+    """
+
+    from duct_calc import flanges, thickness
+
+    wall = getattr(thickness, "_ameri_original_flange_wall", None) or thickness.FLANGE_WALL
+    thickness._ameri_original_flange_wall = wall
+    # Границы включительные, из совпавших строк берётся большая толщина: ровно 450 мм остаётся 8 мм.
+    thickness.FLANGE_WALL = (replace(wall[0], end=Decimal(450)), *wall[1:])
+
+    original = getattr(flanges, "_ameri_original_pair_price", None) or flanges.FlangePriceBook.pair_price
+    flanges._ameri_original_pair_price = original
+
+    def pair_price(self, end, *, explicit_flange_thickness_mm=None):
+        if end.kind != "round" or end.dimensions[0] in self.round_prices:
+            return original(self, end)
+        d = end.dimensions[0]
+        one = round_flange_price(d, round_flange_sheet_thickness(d), material_price)
+        if one is None:
+            return original(self, end)
+        return flanges.PairPrice(one * 2, "calculated", f"{d.normalize():f}")
+
+    flanges.FlangePriceBook.pair_price = pair_price
+
+
 def _install_decisions(pipeline) -> None:
     """Q38 и Q39 поверх прототипа: оборачиваем его функции, исходные сохраняем для повторной установки.
 
@@ -1306,6 +1385,10 @@ def duct_calc(
     with tempfile.TemporaryDirectory() as tmp:
         output = Path(tmp) / f"расчетка_{spec.path.stem}.xlsx"
         template = duct_calc_dir / "data" / DUCT_TEMPLATE_NAME
+        material_price = template_material_price(template)
+        if material_price is not None:
+            # Без числа в шаблоне прототип сам остановится с понятной ошибкой.
+            _install_flange_price(material_price)
         connection = CONNECTION_TYPES[connection_label]
 
         def run_lines() -> tuple[object, str]:
