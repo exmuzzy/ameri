@@ -1325,11 +1325,57 @@ def _install_source_line_restore(pipeline) -> None:
     pipeline.stitch_model_chunks = stitch_model_chunks
 
 
+# Диаметр в записи тройника: «ø200», «ф250», «560». Число перед «гр», «°», «шт», «м» — угол или количество.
+_TEE_D = r"(?:[øØ⌀∅фФdD]\s*)?(\d{2,4})(?![\d.,]*\s*(?:°|гр|град|шт|мп|м\.|м\b))"
+_TEE_DIAMETERS_RE = re.compile(rf"{_TEE_D}(?:\s*(?:-{{1,2}}|–|/)\s*{_TEE_D}){{1,2}}", re.IGNORECASE)
+
+
+def round_tee_diameters(source_text: str) -> tuple[float, float] | None:
+    """Магистраль и ответвление круглого тройника из строки: ответвление — меньший диаметр.
+
+    «ø200-ø200-ø150», «315--250--315», «ф250/ф160»; при трёх разных диаметрах магистраль — больший.
+    None — если в строке нет двух-трёх диаметров подряд.
+    """
+
+    text = _QTY_TAIL_RE.sub("", _SYSTEM_TAIL_RE.sub("", _plain_item_text(source_text)))
+    match = _TEE_DIAMETERS_RE.search(text)
+    if match is None:
+        return None
+    diameters = [float(value) for value in re.findall(_TEE_D, match.group(0), re.IGNORECASE)]
+    return max(diameters), min(diameters)
+
+
+def round_tee_from_text(position):
+    """Размеры круглого тройника — из строки, а не от модели: в длинной части она путает ответвление с магистралью."""
+
+    if getattr(position, "element_type", None) != "tee_round_round":
+        return position
+    diameters = round_tee_diameters(getattr(position, "source_text", "") or "")
+    if diameters is None:
+        return position
+    main, branch = diameters
+    if position.size.get("d") == main and position.size.get("branch_d") == branch:
+        return position
+    questions = tuple(q for q in position.questions if q.code not in {"missing_size_d", "missing_size_branch_d"})
+    return replace(position, size={**position.size, "d": main, "branch_d": branch}, questions=questions)
+
+
+def _install_tee_branch(pipeline) -> None:
+    """Круглый тройник: ответвление — меньший диаметр из строки; длину потом ставит прототип (врезка + 300)."""
+
+    if not hasattr(pipeline, "with_standard_tee_equal_branch"):
+        return
+    original = getattr(pipeline, "_ameri_original_tee_equal_branch", None) or pipeline.with_standard_tee_equal_branch
+    pipeline._ameri_original_tee_equal_branch = original
+    pipeline.with_standard_tee_equal_branch = lambda position: original(round_tee_from_text(position))
+
+
 def _install_harness(harness_dir: Path | None) -> None:
     """Подключить Харнес к прототипу duct-calc: правила разбора, ключевые слова, решения Q38 и Q39.
 
     Поверх прототипа: ХИМВЕНТ на названном элементе считается, отдельный фланец или раструб
-    попадает в стоимость соединения, система из строки не теряется, если модель её отбросила.
+    попадает в стоимость соединения, система из строки не теряется, если модель её отбросила,
+    ответвление круглого тройника — меньший диаметр из строки.
     """
 
     from duct_calc import pipeline
@@ -1338,6 +1384,7 @@ def _install_harness(harness_dir: Path | None) -> None:
     _install_coupling_as_socket(pipeline)
     _install_catalog_line_rules(pipeline)
     _install_source_line_restore(pipeline)
+    _install_tee_branch(pipeline)
 
     original = getattr(pipeline, "_ameri_original_prompt", None) or pipeline.build_system_prompt
     pipeline._ameri_original_prompt = original

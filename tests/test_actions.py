@@ -1249,3 +1249,43 @@ def test_system_survives_model_dropping_it_from_numbered_line(real_duct_calc, tm
     row = pipeline._problem_output_row(item, "не указан размер angle")
     assert (row.system, row.nomenclature) == ("Во 1.1", "Отвод из полипропилена ø350-ø350, толщ. 4,0 мм — 9 шт.")
     assert row.quantity == 9
+
+
+def test_round_tee_branch_is_the_smaller_diameter():
+    """Ответвление круглого тройника — меньший диаметр, магистраль — больший; угол и количество не диаметры."""
+
+    assert actions.round_tee_diameters("Тройник из полипропилена ø300-ø300-ø150, толщ. 4,0 мм — 2 шт.") == (300, 150)
+    assert actions.round_tee_diameters("Тройник ПП 560--400--560 с отводом 400") == (560, 400)
+    assert actions.round_tee_diameters("Тройник ⌀250-⌀160 под углом 45 гр.") == (250, 160)
+    assert actions.round_tee_diameters("Тройник ф315/ф250/ф315 - 1шт - раструб/труба/труба") == (315, 250)
+    assert actions.round_tee_diameters("Тройник ø500-ø400-ø250") == (500, 250)  # с переходом: магистраль — больший
+    assert actions.round_tee_diameters("Тройник ø450-ø450-ø450") == (450, 450)
+    assert actions.round_tee_diameters("Тройник ø250; система П 12/14; кол-во: 2") is None
+    for text in ("Тройник ф250-90гр", "Тройник ф110", "Тройник ф250 — 12 шт", "Тройник 200х200х200"):
+        assert actions.round_tee_diameters(text) is None, text
+
+
+def test_round_tee_length_uses_smaller_diameter_even_if_model_took_main(real_duct_calc):
+    """Модель вернула ответвление = магистраль или пустое — длина всё равно врезка + 300 по меньшему диаметру."""
+
+    actions._install_harness(None)
+    actions._install_harness(None)  # повторная установка не оборачивает обёртку
+    from duct_calc import pipeline
+    from duct_calc.model_schema import parse_model_response
+
+    def tee(no, text, size, length=None):
+        raw = {"source_no": no, "source_text": text, "element_type": "tee_round_round", "qty": 1, "size": size,
+               "length_mm": length, "ends": [{"role": r, "connection": "flange"} for r in ("main_in", "main_out", "branch")]}
+        position = parse_model_response({"positions": [raw]}).positions[0]
+        return pipeline.with_standard_tee_total_length(
+            pipeline.with_standard_tee_branch_length(pipeline.with_standard_tee_equal_branch(position))
+        )
+
+    text = "Тройник из полипропилена ø300-ø300-ø150, толщ. 4,0 мм — 2 шт."
+    for size in ({"d": 300, "branch_d": 300}, {"d": 300, "branch_d": None}, {"d": 150, "branch_d": 300}):
+        position = tee("1", text, size)
+        assert (position.size["d"], position.size["branch_d"], position.length_mm) == (300, 150, 450), size
+        assert not position.questions, size
+    # Длина из строки или от модели не меняется; без диаметров в строке остаётся ответ модели.
+    assert tee("2", text, {"d": 300, "branch_d": 150}, length=900).length_mm == 900
+    assert tee("3", "Тройник ф110", {"d": 110, "branch_d": None}).length_mm == 410
