@@ -1338,3 +1338,66 @@ def test_long_straight_is_nonstandard_whatever_the_quantity(real_duct_calc):
         (1500, (Decimal("1.2"), Decimal("2.4"))),
         (200, (Decimal("1.3"), Decimal("2.4"))),
     ]
+
+
+def _area_of(element_type, length, **size):
+    from duct_calc import pipeline
+    from duct_calc.model_schema import ModelPosition
+
+    position = ModelPosition(source_no="1", source_text="t", element_type=element_type, qty=1, thickness_mm=None,
+                             length_mm=length, size=size, ends=(), questions=())
+    return float(pipeline._area(position))
+
+
+def test_rect_round_transition_area_uses_length_like_excel(real_duct_calc):
+    """Переход прямоугольник–круг: длина входит в площадь (K52 эталона = длина / …), а не диаметр.
+
+    Значения — пересчёт листа «расчет площади» эталонной расчётки (блок K51:M56) в LibreOffice.
+    """
+
+    actions._install_harness(None)
+    actions._install_harness(None)  # повторная установка безопасна
+    assert _area_of("transition_rect_round", 600, a=1000, b=600, d_out=800) == 1.97
+    assert _area_of("transition_rect_round", 300, a=600, b=400, d_out=500) == 0.70
+    assert _area_of("transition_rect_round", 200, a=300, b=200, d_out=250) == 0.27
+    # Длина действительно меняет площадь: раньше все три давали одно значение.
+    short, long_ = (_area_of("transition_rect_round", n, a=1000, b=600, d_out=800) for n in (200, 1000))
+    assert short < 1.97 < long_
+
+
+def test_offset_rect_2_pairs_a_with_first_shift_like_excel(real_duct_calc):
+    """Утка в двух плоскостях: a со сдвигом h1, b со сдвигом h2 (M120 эталона); при a≠b и h1≠h2 это видно."""
+
+    import math
+
+    actions._install_harness(None)
+    actions._install_harness(None)
+
+    def excel(a, b, length, h1, h2):
+        a, b, length, h1, h2 = (v / 1000 for v in (a, b, length, h1, h2))
+        return 2 * (b * math.hypot(length, h2) + a * math.hypot(length, h1) + 0.1 * (a + b))
+
+    for a, b, length, h1, h2 in ((300, 250, 400, 50, 120), (1000, 200, 300, 20, 400)):
+        got = _area_of("offset_rect_2", length, a=a, b=b, offset1=h1, offset2=h2)
+        assert got == pytest.approx(excel(a, b, length, h1, h2), abs=0.0011)
+    swapped = _area_of("offset_rect_2", 300, a=1000, b=200, offset1=400, offset2=20)
+    assert swapped != pytest.approx(_area_of("offset_rect_2", 300, a=1000, b=200, offset1=20, offset2=400), abs=0.01)
+
+
+def test_mass_column_uses_template_formula(real_duct_calc, tmp_path):
+    """Колонка S «Масса» — формула шаблона: с «% на раскрой» и весом соединений, как в строке 12 шаблона."""
+
+    from openpyxl import load_workbook
+
+    actions._install_harness(None)
+    from duct_calc import pipeline, xlsx_out
+
+    if not pipeline.DEFAULT_TEMPLATE_PATH.is_file():
+        pytest.skip("нет шаблона расчётки")
+    row = xlsx_out.OutputRow(system=None, nomenclature="Воздуховод", length_mm=1500, quantity=2, thickness_mm=3,
+                             area_m2=1.0, l=1.2, m=2.4, connection_cost=500)
+    out = xlsx_out.write_workbook(pipeline.DEFAULT_TEMPLATE_PATH, tmp_path / "out.xlsx", [row, row])
+    template_sheet = load_workbook(pipeline.DEFAULT_TEMPLATE_PATH)[xlsx_out.SHEET_NAME]
+    sheet = load_workbook(out)[xlsx_out.SHEET_NAME]
+    for number in (12, 13):
+        assert sheet[f"S{number}"].value == template_sheet["S12"].value.replace("12", str(number))

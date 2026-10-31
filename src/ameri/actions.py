@@ -1392,12 +1392,100 @@ def _install_long_straight_as_nonstandard(pipeline) -> None:
     pipeline._straight_piece_adjustment = _straight_piece_adjustment
 
 
+def transition_rect_round_area(a_mm, b_mm, d_out_mm, length_mm):
+    """Площадь перехода прямоугольник–круг по эталонной расчётке (лист «расчет площади», блок K51:M56).
+
+    В прототипе в K52 стоял диаметр круга вместо длины перехода: `K52 = M54/1000/((K51−M53/1000)/2)`.
+    Остальное — как в прототипе (формулы и округление те же).
+    """
+
+    from duct_calc import formulas as f
+
+    a = f.decimal(a_mm) / f.MM_TO_M
+    b = f.decimal(b_mm) / f.MM_TO_M
+    d_out = f.decimal(d_out_mm) / f.MM_TO_M
+    length = f.decimal(length_mm) / f.MM_TO_M
+    pi, deg = f.PI_314, f.PI_314 / f.Decimal(180)
+
+    k51 = (2 * a + 2 * b) / pi
+    denominator = (k51 - d_out) / 2
+    if denominator == 0:
+        raise f.CalculationNeedsInput(
+            "Переход прямоугольник-круг: невозможно вычислить угол", code="invalid_geometry"
+        )
+    k53 = f._atan(length / denominator) / deg
+    cosine = f._cos(k53 * deg)
+    if cosine == 0:
+        raise f.CalculationNeedsInput(
+            "Переход прямоугольник-круг: нулевая косинусная проекция", code="invalid_geometry"
+        )
+    k54 = (k51 / 2) / cosine
+    k55 = (d_out / 2) / cosine
+    asin_a = f._asin(a / 2 / k54, context="Переход прямоугольник-круг, сторона a")
+    asin_b = f._asin(b / 2 / k54, context="Переход прямоугольник-круг, сторона b")
+    k57 = f.Decimal("0.5") * f._sqrt(k54 * k54 - (a / 2) * (a / 2), context="переход прямоугольник-круг") * a
+    k59 = f.Decimal("0.5") * f._sqrt(k54 * k54 - (b / 2) * (b / 2), context="переход прямоугольник-круг") * b
+    k60 = 4 * asin_a / deg + 4 * asin_b / deg
+    value = abs(
+        (2 * k57 + 2 * k59)
+        - (pi * k55 * k55 * k60 / 360)
+        + (2 * a + 2 * b) * f.Decimal("0.05")
+        + pi * d_out * f.Decimal("0.05")
+    )
+    return f.roundup(value, 2)
+
+
+def _install_rect_round_transition(pipeline) -> None:
+    """Переход прямоугольник–круг считается с длиной перехода, как в эталонной расчётке."""
+
+    if not hasattr(pipeline, "transition_rect_round"):
+        return
+    pipeline.transition_rect_round = transition_rect_round_area
+
+
+def _install_offset_rect_2(pipeline) -> None:
+    """Утка в двух плоскостях: сторона a идёт со сдвигом h1, b — с h2 (ячейка M120 эталона).
+
+    Прототип ставил наоборот (a — со вторым сдвигом); меняем сдвиги местами перед его формулой.
+    """
+
+    if not hasattr(pipeline, "offset_rect_2"):
+        return
+    original = getattr(pipeline, "_ameri_original_offset_rect_2", None) or pipeline.offset_rect_2
+    pipeline._ameri_original_offset_rect_2 = original
+    pipeline.offset_rect_2 = lambda a, b, length, offset_1, offset_2: original(a, b, length, offset_2, offset_1)
+
+
+MASS_FORMULA = "=G{row}*I{row}*K{row}*L{row}+(R{row}-O{row})/2.5/J{row}"
+
+
+def _install_mass_formula() -> None:
+    """Колонка S «Масса»: формула шаблона (с раскроем и весом соединений), а не упрощённая G·I·K."""
+
+    try:
+        from duct_calc import xlsx_out
+    except ImportError:
+        return
+    if not hasattr(xlsx_out, "_write_row_formulas"):
+        return
+    original = getattr(xlsx_out, "_ameri_original_row_formulas", None) or xlsx_out._write_row_formulas
+    xlsx_out._ameri_original_row_formulas = original
+
+    def _write_row_formulas(sheet, row: int) -> None:
+        original(sheet, row)
+        sheet[f"S{row}"] = MASS_FORMULA.format(row=row)
+
+    xlsx_out._write_row_formulas = _write_row_formulas
+
+
 def _install_harness(harness_dir: Path | None) -> None:
     """Подключить Харнес к прототипу duct-calc: правила разбора, ключевые слова, решения Q38 и Q39.
 
     Поверх прототипа: ХИМВЕНТ на названном элементе считается, отдельный фланец или раструб
     попадает в стоимость соединения, система из строки не теряется, если модель её отбросила,
-    ответвление круглого тройника — меньший диаметр из строки, прямик длиннее 1500 мм — нестандарт.
+    ответвление круглого тройника — меньший диаметр из строки, прямик длиннее 1500 мм — нестандарт;
+    формулы по эталонной расчётке: переход прямоугольник–круг с длиной, утка в двух плоскостях (a с h1, b с h2),
+    масса в колонке S по формуле шаблона.
     """
 
     from duct_calc import pipeline
@@ -1408,6 +1496,9 @@ def _install_harness(harness_dir: Path | None) -> None:
     _install_source_line_restore(pipeline)
     _install_tee_branch(pipeline)
     _install_long_straight_as_nonstandard(pipeline)
+    _install_rect_round_transition(pipeline)
+    _install_offset_rect_2(pipeline)
+    _install_mass_formula()
 
     original = getattr(pipeline, "_ameri_original_prompt", None) or pipeline.build_system_prompt
     pipeline._ameri_original_prompt = original
