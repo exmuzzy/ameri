@@ -1401,3 +1401,87 @@ def test_mass_column_uses_template_formula(real_duct_calc, tmp_path):
     sheet = load_workbook(out)[xlsx_out.SHEET_NAME]
     for number in (12, 13):
         assert sheet[f"S{number}"].value == template_sheet["S12"].value.replace("12", str(number))
+
+
+def test_unclear_fragment_is_found_by_marker_patterns():
+    patterns = actions.compile_unclear_markers([r"(?<![\wа-яё])ш\s?\d{2}(?!\d)"])
+    assert actions.unclear_fragment("Воздуховод 350*350 ш20 2м", patterns) == "ш20"
+    assert actions.unclear_fragment("Воздуховод 350*350 Ш 30 2м", patterns) == "Ш 30"
+    # Обычные слова и числа не принимаются за маркер: «шт», «ш» без числа, «ш» внутри слова, «ш200».
+    for text in ("Воздуховод 350*350 — 2 шт", "Зонт ш", "Воздуховод швеллер20 2м", "Воздуховод ш200 2м", "Воздуховод 350*350 2м"):
+        assert actions.unclear_fragment(text, patterns) is None, text
+
+
+def test_marker_thickness_is_dropped_but_real_thickness_is_kept():
+    """«ш20» модель читает как толщину 20 мм — сбрасываем; настоящую толщину («толщ. 4») не трогаем."""
+
+    from dataclasses import dataclass
+
+    @dataclass(frozen=True)
+    class Position:
+        source_text: str
+        thickness_mm: float | None
+
+    patterns = actions.compile_unclear_markers([r"(?<![\wа-яё])ш\s?\d{2}(?!\d)"])
+    assert actions.without_marker_thickness(Position("Воздуховод 350*350 ш20 2м", 20), patterns).thickness_mm is None
+    assert actions.without_marker_thickness(Position("Воздуховод 350*350 ш20 толщ. 4 мм", 4), patterns).thickness_mm == 4
+    assert actions.without_marker_thickness(Position("Воздуховод 350*350 2м", 20), patterns).thickness_mm == 20
+    assert actions.without_marker_thickness(Position("Воздуховод 350*350 ш20 2м", None), patterns).thickness_mm is None
+
+
+def test_red_positions_split_unclear_from_not_calculated(tmp_path):
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append([None, 1, "Воздуховод 350*350 ш20 2м — отрезки по 1500 мм (проблема: УТОЧНИТЬ: что значит «ш20»?)"])
+    sheet.append([None, 2, "Переход ПП ф315\t2\tшт (проблема: Позиция 5: не указан размер d_out)"])
+    path = tmp_path / "r.xlsx"
+    book.save(path)
+    assert actions.red_positions(path, kind="unclear") == [
+        "«Воздуховод 350*350 ш20 2м — отрезки по 1500 мм» — УТОЧНИТЬ: что значит «ш20»?"
+    ]
+    assert actions.red_positions(path, kind="problem") == ["«Переход ПП ф315 · 2 · шт» — не указан второй диаметр (выход)"]
+    assert len(actions.red_positions(path)) == 2
+
+
+def test_sh20_line_is_calculated_red_and_marked_clarify(real_duct_calc, tmp_path):
+    """«Воздуховод 350*350 ш20 2м»: считается по понятной части (1500 + 500, толщина 4 из таблицы),
+    обе строки красные с «УТОЧНИТЬ»; не покупная позиция с 0 ₽ из-за «толщины 20»."""
+
+    from decimal import Decimal
+
+    import openpyxl
+
+    actions._install_harness(HARNESS)
+    actions._install_harness(HARNESS)  # повторная установка не наслаивает обёртки
+    from duct_calc import pipeline, xlsx_out
+    from duct_calc.coefficients import CoefficientTable
+    from duct_calc.model_schema import parse_model_response
+
+    if not pipeline.DEFAULT_TEMPLATE_PATH.is_file():
+        pytest.skip("нет шаблона расчётки")
+    coefficients = CoefficientTable.from_workbook(pipeline.DEFAULT_TEMPLATE_PATH)
+
+    def rows_for(text, thickness):
+        raw = {"source_no": "1", "source_text": text, "element_type": "straight_rect", "qty": 2, "size": {"a": 350, "b": 350},
+               "thickness_mm": thickness, "length_mm": None, "ends": [{"role": r, "connection": "flange"} for r in ("in", "out")]}
+        position = parse_model_response({"positions": [raw]}).positions[0]
+        position = actions.without_marker_thickness(position, pipeline._ameri_unclear_patterns)
+        return pipeline._output_rows_for_position(
+            position, coefficients, meter_source_nos=("1",), system=None, connection_type="flange"
+        )
+
+    rows = rows_for("Воздуховод 350*350 ш20 2м", 20)  # модель прочитала «ш20» как толщину 20
+    assert [row.length_mm for row in rows] == [1500, 500]
+    assert all(not row.purchased and row.thickness_mm == Decimal(4) and row.area_m2 for row in rows)
+    assert all(row.problem == "УТОЧНИТЬ: что значит «ш20»?" for row in rows)
+
+    plain = rows_for("Воздуховод 350*350 2м", None)
+    assert [row.problem for row in plain] == [None, None]
+
+    out = xlsx_out.write_workbook(pipeline.DEFAULT_TEMPLATE_PATH, tmp_path / "out.xlsx", rows + plain)
+    sheet = openpyxl.load_workbook(out)[xlsx_out.SHEET_NAME]
+    assert "(проблема: УТОЧНИТЬ: что значит «ш20»?)" in sheet["C12"].value
+    assert sheet["C12"].font.color.rgb.endswith("FF0000") and sheet["C13"].font.color.rgb.endswith("FF0000")
+    assert "проблема" not in sheet["C14"].value
