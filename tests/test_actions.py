@@ -1485,3 +1485,59 @@ def test_sh20_line_is_calculated_red_and_marked_clarify(real_duct_calc, tmp_path
     assert "(проблема: УТОЧНИТЬ: что значит «ш20»?)" in sheet["C12"].value
     assert sheet["C12"].font.color.rgb.endswith("FF0000") and sheet["C13"].font.color.rgb.endswith("FF0000")
     assert "проблема" not in sheet["C14"].value
+
+
+def test_quantity_check_message_names_lines_without_quantity():
+    from decimal import Decimal
+    from types import SimpleNamespace as Block
+
+    blocks = [
+        Block(source_no="21", text="21. Воздуховод ф250 — 3 шт", quantity=Decimal(3)),
+        Block(source_no="22", text="раструб 160 - 5", quantity=None),
+        Block(source_no="23", text="фланец д315 – 5", quantity=None),
+        Block(source_no=None, text="заголовок раздела", quantity=None),  # не позиция
+    ]
+    assert actions.quantity_check_message(blocks) == (
+        "Контроль количеств не выполнен: не распознано количество в строках "
+        "№22 «раструб 160 - 5», №23 «фланец д315 – 5»"
+    )
+    assert actions.quantity_check_message(blocks[:1]) is None
+    # Длинный список обрезается, длинная строка сокращается.
+    many = [Block(source_no=str(n), text="Воздуховод " + "очень длинное название " * 5, quantity=None) for n in range(1, 13)]
+    many.append(Block(source_no="13", text="13. Отвод ф250 — 2 шт", quantity=Decimal(2)))
+    message = actions.quantity_check_message(many)
+    assert message.endswith("…и ещё 4") and "…»" in message and message.count("№") == 8
+    # Нет количества ни у одной строки — не перечисляем весь файл.
+    assert "ни у одной строки" in actions.quantity_check_message(many[:12])
+
+
+def test_completeness_message_is_replaced_only_for_unknown_sum(real_duct_calc):
+    """Через настоящий прототип: общее сообщение заменено, остальные сообщения проверки полноты прежние."""
+
+    from decimal import Decimal
+    from pathlib import Path
+
+    actions._install_harness(None)
+    actions._install_harness(None)  # повторная установка не наслаивает обёртки
+    from duct_calc import pipeline
+    from duct_calc.document_parser import ExtractedDocument, SourceBlock
+    from duct_calc.model_schema import ModelPosition, ModelResponse
+
+    def document(*blocks):
+        return ExtractedDocument(path=Path("s.md"), filename="s.md", source_type="md", text="", blocks=tuple(blocks))
+
+    def position(no, qty):
+        return ModelPosition(source_no=no, source_text="t", element_type="cap_round", qty=qty, thickness_mm=None,
+                             length_mm=None, size={"d": 250}, ends=(), questions=())
+
+    source = document(
+        SourceBlock(text="1. Заглушка ф250 — 3 шт", source_label="s", source_no="1", quantity=Decimal(3)),
+        SourceBlock(text="раструб 160 - 5", source_label="s", source_no="2", quantity=None),
+    )
+    result = pipeline.compare_completeness(source, ModelResponse(positions=(position("1", 3), position("2", 5)), warnings=()))
+    assert result.message == "Контроль количеств не выполнен: не распознано количество в строках №2 «раструб 160 - 5»"
+
+    # Сумма известна, но не сходится — сообщение прототипа остаётся как есть.
+    known = document(SourceBlock(text="1. Заглушка ф250 — 3 шт", source_label="s", source_no="1", quantity=Decimal(3)))
+    result = pipeline.compare_completeness(known, ModelResponse(positions=(position("1", 2),), warnings=()))
+    assert result.message == "Сумма количеств: в источнике 3, в разборе 2"
