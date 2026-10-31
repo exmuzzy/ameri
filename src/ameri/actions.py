@@ -280,8 +280,14 @@ PROBLEM_FIELDS = {
 }
 
 
-def red_positions(xlsx: Path, limit: int = 20) -> list[str]:
-    """Позиции, которые расчётка пометила «(проблема: …)», — для ответа в Чате."""
+UNCLEAR_PREFIX = "УТОЧНИТЬ"
+
+
+def red_positions(xlsx: Path, limit: int = 20, kind: str = "all") -> list[str]:
+    """Позиции, которые расчётка пометила «(проблема: …)», — для ответа в Чате.
+
+    kind: «all» — все; «unclear» — только посчитанные с пометкой «УТОЧНИТЬ»; «problem» — остальные (не посчитаны).
+    """
 
     import re
 
@@ -300,6 +306,9 @@ def red_positions(xlsx: Path, limit: int = 20) -> list[str]:
             text = " ".join(text.replace("\t", " · ").split())
             text = re.sub(r"\s*·\s*Кол-во:.*$", "", text)
             reason = re.sub(r"^\s*Позиция\s*\d*:\s*", "", reason.strip().rstrip(")"))
+            is_unclear = reason.startswith(UNCLEAR_PREFIX)
+            if (kind == "unclear" and not is_unclear) or (kind == "problem" and is_unclear):
+                break
             for field, title in PROBLEM_FIELDS.items():
                 reason = reason.replace(f"размер {field}", title).replace(f"длина {field}", title).replace(field, title)
             found.append(f"«{text[:90]}» — {reason}")
@@ -1319,7 +1328,8 @@ def _install_source_line_restore(pipeline) -> None:
         for position in result.response.positions:
             line = lines.get(str(position.source_no))
             restored = restored_source_text(position.source_text, line) if line else None
-            positions.append(_with_source_text(position, restored) if restored else position)
+            position = _with_source_text(position, restored) if restored else position
+            positions.append(without_marker_thickness(position, getattr(pipeline, "_ameri_unclear_patterns", ())))
         return replace(result, response=replace(result.response, positions=tuple(positions)))
 
     pipeline.stitch_model_chunks = stitch_model_chunks
@@ -1390,6 +1400,58 @@ def _install_long_straight_as_nonstandard(pipeline) -> None:
         return updated, problem, LONG_STRAIGHT_CATEGORY if category in long_categories else category
 
     pipeline._straight_piece_adjustment = _straight_piece_adjustment
+
+
+def compile_unclear_markers(markers) -> tuple:
+    """Регулярные выражения «непонятных уточнений» клиента из params.yaml (`unclear_markers`)."""
+
+    return tuple(re.compile(str(pattern), re.IGNORECASE) for pattern in markers or ())
+
+
+def unclear_fragment(text: str, patterns) -> str | None:
+    """Первый непонятный фрагмент строки («ш20») или None."""
+
+    for pattern in patterns:
+        match = pattern.search(text or "")
+        if match:
+            return match.group(0).strip()
+    return None
+
+
+def without_marker_thickness(position, patterns):
+    """«ш20» модель читает как толщину 20 мм, и позиция уходит в покупные с 0 ₽: сбрасываем такую толщину."""
+
+    fragment = unclear_fragment(getattr(position, "source_text", ""), patterns)
+    thickness = getattr(position, "thickness_mm", None)
+    if fragment is None or not isinstance(thickness, (int, float)) or isinstance(thickness, bool):
+        return position
+    numbers = re.findall(r"\d+(?:[.,]\d+)?", fragment)
+    if numbers and float(numbers[-1].replace(",", ".")) == float(thickness):
+        return replace(position, thickness_mm=None)
+    return position
+
+
+def _install_unclear_markers(pipeline, markers) -> None:
+    """Строки с непонятным уточнением («ш20») считаются по понятной части, красятся и получают «УТОЧНИТЬ».
+
+    Решение заказчика 2026-10-31. Красную строку и «(проблема: …)» рисует прототип, если у строки есть `problem`.
+    """
+
+    pipeline._ameri_unclear_patterns = compile_unclear_markers(markers)
+    if not hasattr(pipeline, "_output_rows_for_position"):
+        return
+    original = getattr(pipeline, "_ameri_original_output_rows", None) or pipeline._output_rows_for_position
+    pipeline._ameri_original_output_rows = original
+
+    def _output_rows_for_position(position, *args, **kwargs):
+        rows = original(position, *args, **kwargs)
+        fragment = unclear_fragment(getattr(position, "source_text", ""), pipeline._ameri_unclear_patterns)
+        if fragment is None:
+            return rows
+        note = f"{UNCLEAR_PREFIX}: что значит «{fragment}»?"
+        return [replace(row, problem=row.problem or note) for row in rows]
+
+    pipeline._output_rows_for_position = _output_rows_for_position
 
 
 def transition_rect_round_area(a_mm, b_mm, d_out_mm, length_mm):
@@ -1506,6 +1568,7 @@ def _install_harness(harness_dir: Path | None) -> None:
     pipeline.build_system_prompt = (lambda: original() + "\n\n" + rules) if rules else original
 
     params = duct_params(harness_dir)
+    _install_unclear_markers(pipeline, params.get("unclear_markers"))
     for key, attr in _KEYWORD_LISTS.items():
         base = getattr(pipeline, f"_ameri_original_{attr}", None) or getattr(pipeline, attr)
         setattr(pipeline, f"_ameri_original_{attr}", base)
@@ -1662,10 +1725,16 @@ def duct_calc(
             # Прототип не строит пустую расчётку: в файле нет ни одной позиции с размером или количеством.
             return ActionResult(text=NO_POSITIONS_TEXT)
         lines = [f"Расчётка по файлу «{spec.name}» готова ({connection_label.lower()}). {summary}"]
-        red = red_positions(output)
+        red = red_positions(output, kind="problem")
         if red:
             lines.append(
                 "Красные позиции — не посчитаны, нужно уточнить:\n" + "\n".join(f"- {item}" for item in red)
+            )
+        unclear = red_positions(output, kind="unclear")
+        if unclear:
+            lines.append(
+                "Красные позиции с пометкой «УТОЧНИТЬ» — посчитаны по понятной части, "
+                "цену подтвердите у клиента:\n" + "\n".join(f"- {item}" for item in unclear)
             )
         lines += result_notes(output, connection_label)
         notes = [manager_warning(w) for w in result.warnings if _COEFFICIENT_NOTE.fullmatch(w)]
