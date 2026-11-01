@@ -50,6 +50,9 @@ def test_harness_files_load():
     assert access.can(leader, "feedback.review")
     assert access.can(admin, "harness.edit")
     assert access.can(admin, "feedback.review")
+    assert not access.can(manager, "api.tokens")
+    assert access.can(leader, "api.tokens")
+    assert access.can(admin, "api.tokens")
     assert "ameri" in assistant_prompt(HARNESS)
 
 
