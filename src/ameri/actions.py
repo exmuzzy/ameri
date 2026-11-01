@@ -1266,7 +1266,8 @@ def _install_flange_price(material_price: Decimal) -> None:
 def _install_decisions(pipeline) -> None:
     """Q38 и Q39 поверх прототипа: оборачиваем его функции, исходные сохраняем для повторной установки.
 
-    Q37 (1500 + остаток) делает сам прототип, нарезку метража не перехватываем.
+    Q37 (1500 + остаток) делает сам прототип; метраж больше 1500 и до 2000 мм включительно
+    перехватывает `_install_short_meters_as_one_piece` (одна штука, нестандарт).
     """
 
     neck = getattr(pipeline, "_ameri_original_umbrella_neck", None) or pipeline.with_umbrella_optional_neck_key
@@ -1376,12 +1377,31 @@ def _install_tee_branch(pipeline) -> None:
 
 
 LONG_STRAIGHT_CATEGORY = "нестандарт фасон"
+STRAIGHT_TYPES = ("straight_round", "straight_rect")
+STANDARD_PIECE_MM = Decimal("1500")
+ONE_PIECE_MAX_MM = Decimal("2000")
+# «2 шт по 2 м», «3 шт. по 1,8 мп»: штуки и длина одной штуки в метрах. «по 2000 мм» сюда не входит.
+_PIECES_OF_METERS_RE = re.compile(
+    r"(\d+(?:[.,]\d+)?)\s*шт\.?\s*по\s*(\d+(?:[.,]\d+)?)\s*(?:м\.?\s*п\.?|п\.?\s*м\.?|м\.?)(?!\w)", re.IGNORECASE
+)
+
+
+def pieces_of_meters(text: str) -> tuple[float, float] | None:
+    """(штук, длина одной штуки в мм) из «N шт по M м»; None — если такой связки в строке нет."""
+
+    match = _PIECES_OF_METERS_RE.search(text or "")
+    if match is None:
+        return None
+    qty, meters = (Decimal(group.replace(",", ".")) for group in match.groups())
+    return float(qty), float(meters * 1000)
 
 
 def _install_long_straight_as_nonstandard(pipeline) -> None:
     """Прямик длиннее 1500 мм — нестандарт (раскрой 1,5, работа 3) при любом числе штук.
 
     Прототип давал нескольким таким штукам свои 1,5 / 1,5 (прямоугольным 1,7 / 1,7) — решение заказчика 2026-10-30.
+    «N шт по M м» — N штук длиной M·1000 мм, как «L=…»: прототип при штуках и метрах в одной строке
+    брал длину у модели (решение заказчика 2026-11-01).
     """
 
     if not hasattr(pipeline, "_straight_piece_adjustment"):
@@ -1389,12 +1409,52 @@ def _install_long_straight_as_nonstandard(pipeline) -> None:
     original = getattr(pipeline, "_ameri_original_straight_piece", None) or pipeline._straight_piece_adjustment
     pipeline._ameri_original_straight_piece = original
     long_categories = set(getattr(pipeline, "LONG_MULTI_COEFFICIENTS", {}))
+    explicit_length = getattr(pipeline, "_explicit_piece_length_mm", lambda text: None)
 
     def _straight_piece_adjustment(position):
+        text = position.source_text or ""
+        pieces = pieces_of_meters(text)
+        if pieces is not None and position.element_type in STRAIGHT_TYPES and explicit_length(text) is None:
+            qty, length_mm = pieces
+            category = LONG_STRAIGHT_CATEGORY if Decimal(str(length_mm)) > STANDARD_PIECE_MM else None
+            return replace(position, qty=qty, length_mm=length_mm), None, category
         updated, problem, category = original(position)
         return updated, problem, LONG_STRAIGHT_CATEGORY if category in long_categories else category
 
     pipeline._straight_piece_adjustment = _straight_piece_adjustment
+
+
+def _install_short_meters_as_one_piece(pipeline) -> None:
+    """Метраж больше 1500 и до 2000 мм включительно («2 м», «1,8 мп») — одна штука, нестандарт 1,5 / 3.
+
+    Прототип резал его по Q37 на 1500 + остаток. Метраж больше 2 м по-прежнему режет прототип
+    (решение заказчика 2026-11-01). Сюда же приходит метраж, пересчитанный из м².
+    """
+
+    if not hasattr(pipeline, "_meter_segment_rows"):
+        return
+    original = getattr(pipeline, "_ameri_original_meter_segments", None) or pipeline._meter_segment_rows
+    pipeline._ameri_original_meter_segments = original
+
+    def _meter_segment_rows(position, coefficients, *, total_meters, system, connection_type):
+        total_mm = Decimal(str(total_meters)) * 1000
+        if not STANDARD_PIECE_MM < total_mm <= ONE_PIECE_MAX_MM:
+            return original(
+                position, coefficients, total_meters=total_meters, system=system, connection_type=connection_type
+            )
+        row = pipeline.position_to_output_row(
+            replace(position, qty=1, length_mm=float(total_mm)),
+            coefficients,
+            system=system,
+            connection_type=connection_type,
+        )
+        if row.purchased or row.l is None:
+            return [row]
+        l_value, m_value = coefficients.for_element(LONG_STRAIGHT_CATEGORY, length_mm=total_mm)
+        multiplier = getattr(pipeline, "_special_price_multiplier", lambda text: Decimal(1))(position.source_text or "")
+        return [replace(row, l=Decimal(str(l_value)) * multiplier, m=m_value)]
+
+    pipeline._meter_segment_rows = _meter_segment_rows
 
 
 def compile_unclear_markers(markers) -> tuple:
@@ -1540,7 +1600,8 @@ def _install_harness(harness_dir: Path | None) -> None:
 
     Поверх прототипа: ХИМВЕНТ на названном элементе считается, отдельный фланец или раструб
     попадает в стоимость соединения, система из строки не теряется, если модель её отбросила,
-    ответвление круглого тройника — меньший диаметр из строки, прямик длиннее 1500 мм — нестандарт;
+    ответвление круглого тройника — меньший диаметр из строки, прямик длиннее 1500 мм — нестандарт,
+    метраж до 2 м включительно и «N шт по M м» не режутся на 1500 + остаток;
     формулы по эталонной расчётке: переход прямоугольник–круг с длиной, утка в двух плоскостях (a с h1, b с h2),
     масса в колонке S по формуле шаблона.
     """
@@ -1553,6 +1614,7 @@ def _install_harness(harness_dir: Path | None) -> None:
     _install_source_line_restore(pipeline)
     _install_tee_branch(pipeline)
     _install_long_straight_as_nonstandard(pipeline)
+    _install_short_meters_as_one_piece(pipeline)
     _install_rect_round_transition(pipeline)
     _install_offset_rect_2(pipeline)
     _install_mass_formula()

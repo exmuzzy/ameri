@@ -616,9 +616,11 @@ def test_install_counts_coupling_as_one_socket(tmp_path, monkeypatch):
 
 
 def test_harness_keeps_prototype_meter_cutting_q37(tmp_path, monkeypatch):
-    """Q37 (а): метраж режет сам прототип — 1500 мм и остаток; Харнес не подменяет его нарезку."""
+    """Q37 (а): метраж больше 2 м и до 1500 мм режет сам прототип — 1500 мм и остаток.
+    Обёртка перехватывает только 1500 < метраж <= 2000 и не наслаивается при повторной установке."""
 
     import sys
+    from decimal import Decimal
 
     for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
         monkeypatch.delitem(sys.modules, name)
@@ -631,7 +633,11 @@ def test_harness_keeps_prototype_meter_cutting_q37(tmp_path, monkeypatch):
 
     pipeline._meter_segment_rows = prototype_cutting
     actions._install_harness(None)
-    assert pipeline._meter_segment_rows is prototype_cutting
+    actions._install_harness(None)
+    assert pipeline._ameri_original_meter_segments is prototype_cutting
+    for meters in ("3.2", "2.01", "1.5", "0.4"):
+        cut = pipeline._meter_segment_rows(None, None, total_meters=Decimal(meters), system=None, connection_type=None)
+        assert cut == "нарезка прототипа", meters
     for name in [n for n in sys.modules if n == "duct_calc" or n.startswith("duct_calc.")]:
         del sys.modules[name]
 
@@ -1355,6 +1361,60 @@ def test_long_straight_is_nonstandard_whatever_the_quantity(real_duct_calc):
     ]
 
 
+def test_straight_up_to_2000_is_one_nonstandard_piece_however_written(real_duct_calc):
+    """Решение заказчика 2026-11-01: прямик больше 1500 и до 2000 мм включительно — одна штука,
+    нестандарт 1,5 / 3, записан ли он «2 м», «L=2000» или «2 шт по 2 м». Раньше «2 м» резался
+    на 1500 + 500 (две штуки, два соединения), а «2 шт по 2 м» зависел от длины, которую дала модель.
+    Метраж больше 2 м режется по Q37, как прежде."""
+
+    from decimal import Decimal
+
+    actions._install_harness(None)
+    actions._install_harness(None)  # повторная установка не оборачивает обёртку
+    from duct_calc import pipeline
+    from duct_calc.coefficients import CoefficientTable
+    from duct_calc.model_schema import parse_model_response
+
+    if not pipeline.DEFAULT_TEMPLATE_PATH.is_file():
+        pytest.skip("нет шаблона расчётки")
+    coefficients = CoefficientTable.from_workbook(pipeline.DEFAULT_TEMPLATE_PATH)
+    nonstandard = (Decimal("1.5"), Decimal("3"))
+
+    def rows_for(text, size, qty, length=None):
+        element_type = "straight_round" if "d" in size else "straight_rect"
+        raw = {"source_no": "1", "source_text": text, "element_type": element_type, "qty": qty, "size": size,
+               "length_mm": length, "ends": [{"role": r, "connection": "flange"} for r in ("in", "out")]}
+        position = parse_model_response({"positions": [raw]}).positions[0]
+        return pipeline._output_rows_for_position(
+            position, coefficients, meter_source_nos=("1",), system=None, connection_type="flange"
+        )
+
+    def summary(rows):
+        return [(float(row.length_mm), float(row.quantity), Decimal(str(row.l)), Decimal(str(row.m))) for row in rows]
+
+    one_2000 = [(2000.0, 1.0, *nonstandard)]
+    assert summary(rows_for("Воздуховод ф250 — 2 м", {"d": 250}, 2)) == one_2000
+    assert summary(rows_for("Воздуховод 700х400 — 2 м.п.", {"a": 700, "b": 400}, 2)) == one_2000
+    assert summary(rows_for("Воздуховод ф250 — 1,8 мп", {"d": 250}, 1.8)) == [(1800.0, 1.0, *nonstandard)]
+    assert rows_for("Воздуховод ф250 — 2 м", {"d": 250}, 2)[0].nomenclature == "Воздуховод ф250 — 2 м"
+    # Ровно 1500 и короче — без изменений: одна штука с обычными коэффициентами.
+    assert summary(rows_for("Воздуховод ф250 — 1,5 м", {"d": 250}, 1.5)) == [(1500.0, 1.0, Decimal("1.2"), Decimal("2.4"))]
+    assert summary(rows_for("Воздуховод ф250 — 1,2 м", {"d": 250}, 1.2)) == [(1200.0, 1.0, Decimal("1.3"), Decimal("2.4"))]
+    # Больше 2 м — Q37: куски по 1500 и остаток.
+    assert [row.length_mm for row in rows_for("Воздуховод ф250 — 2,1 м", {"d": 250}, 2.1)] == [1500, 600]
+    assert [row.length_mm for row in rows_for("Воздуховод ф250 — 3,2 м", {"d": 250}, 3.2)] == [1500, 200]
+    # Штуки: «L=2000» и «N шт по M м» — нестандарт при любом числе штук, без резки.
+    assert summary(rows_for("Воздуховод ф250 L=2000 — 3 шт", {"d": 250}, 3, 2000)) == [(2000.0, 3.0, *nonstandard)]
+    assert summary(rows_for("Воздуховод ф250 L=2000 — 1 шт", {"d": 250}, 1, 2000)) == one_2000
+    assert summary(rows_for("Воздуховод ф250 — 2 шт по 2 м", {"d": 250}, 2)) == [(2000.0, 2.0, *nonstandard)]
+    assert summary(rows_for("Воздуховод 500х300 — 3 шт по 3 м", {"a": 500, "b": 300}, 3)) == [(3000.0, 3.0, *nonstandard)]
+    assert summary(rows_for("Воздуховод ф250 — 4 шт. по 1 м", {"d": 250}, 4)) == [(1000.0, 4.0, Decimal("1.3"), Decimal("2.4"))]
+    # Без «по» связку не трактуем: длина остаётся той, что дала модель.
+    assert actions.pieces_of_meters("Воздуховод ф250 — 4 шт, 8 м") is None
+    assert actions.pieces_of_meters("Воздуховод ф250 — 2 шт по 2000 мм") is None
+    assert actions.pieces_of_meters("Воздуховод ф250 — 2 шт по 1,8 м.п.") == (2.0, 1800.0)
+
+
 def _area_of(element_type, length, **size):
     from duct_calc import pipeline
     from duct_calc.model_schema import ModelPosition
@@ -1461,8 +1521,8 @@ def test_red_positions_split_unclear_from_not_calculated(tmp_path):
 
 
 def test_sh20_line_is_calculated_red_and_marked_clarify(real_duct_calc, tmp_path):
-    """«Воздуховод 350*350 ш20 2м»: считается по понятной части (1500 + 500, толщина 4 из таблицы),
-    обе строки красные с «УТОЧНИТЬ»; не покупная позиция с 0 ₽ из-за «толщины 20»."""
+    """«Воздуховод 350*350 ш20 2м»: считается по понятной части (одна штука 2000 мм — нестандарт,
+    толщина 4 из таблицы), строка красная с «УТОЧНИТЬ»; не покупная позиция с 0 ₽ из-за «толщины 20»."""
 
     from decimal import Decimal
 
@@ -1488,15 +1548,15 @@ def test_sh20_line_is_calculated_red_and_marked_clarify(real_duct_calc, tmp_path
         )
 
     rows = rows_for("Воздуховод 350*350 ш20 2м", 20)  # модель прочитала «ш20» как толщину 20
-    assert [row.length_mm for row in rows] == [1500, 500]
+    assert [(row.length_mm, row.l, row.m) for row in rows] == [(2000, Decimal("1.5"), Decimal("3"))]
     assert all(not row.purchased and row.thickness_mm == Decimal(4) and row.area_m2 for row in rows)
     assert all(row.problem == "УТОЧНИТЬ: что значит «ш20»?" for row in rows)
 
     plain = rows_for("Воздуховод 350*350 2м", None)
-    assert [row.problem for row in plain] == [None, None]
+    assert [row.problem for row in plain] == [None]
 
     out = xlsx_out.write_workbook(pipeline.DEFAULT_TEMPLATE_PATH, tmp_path / "out.xlsx", rows + plain)
     sheet = openpyxl.load_workbook(out)[xlsx_out.SHEET_NAME]
     assert "(проблема: УТОЧНИТЬ: что значит «ш20»?)" in sheet["C12"].value
-    assert sheet["C12"].font.color.rgb.endswith("FF0000") and sheet["C13"].font.color.rgb.endswith("FF0000")
-    assert "проблема" not in sheet["C14"].value
+    assert sheet["C12"].font.color.rgb.endswith("FF0000")
+    assert "проблема" not in sheet["C13"].value and not sheet["C13"].font.color.rgb.endswith("FF0000")
