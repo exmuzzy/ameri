@@ -6,7 +6,7 @@ import streamlit as st
 
 from ameri.store import ApiToken
 
-from views.common import current_user, display_name, get_store
+from views.common import current_user, display_name, get_access, get_store
 
 TERMS = {"30 дней": 30, "90 дней": 90, "1 год": 365, "Без срока": None}
 
@@ -39,8 +39,11 @@ def _token_row(token: ApiToken, show_owner: bool) -> None:
 
 def render() -> None:
     user = current_user()
-    store = get_store()
     st.title("Доступ к API")
+    if not get_access().can(user, "api.tokens"):
+        st.error("Недостаточно прав: личные токены API создают руководитель и администратор.")
+        return
+    store = get_store()
     st.caption(
         "Токен даёт скрипту или агенту (Claude Code, Cursor) те же права, что у вас на сайте: "
         "чаты, вопросы ассистенту, расчётки. Храните его как пароль."

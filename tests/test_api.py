@@ -312,7 +312,7 @@ def test_personal_token_from_site(env):
     assert client.get("/api/v1/me", headers={"Authorization": f"Bearer {forever}"}).status_code == 200
 
 
-def _token_page_script():
+def _token_page_script(role: str):
     import sys
     from pathlib import Path
 
@@ -322,7 +322,7 @@ def _token_page_script():
     from ameri.auth import User
     from views import api_access
 
-    st.session_state["user"] = User("anna", "Анна", "manager", "")
+    st.session_state["user"] = User("boss", "Борис", role, "")
     api_access.render()
 
 
@@ -331,7 +331,7 @@ def test_api_token_page_creates_and_revokes(tmp_path, monkeypatch):
 
     monkeypatch.setenv("AMERI_DATA_DIR", str(tmp_path))
     monkeypatch.chdir(Path(__file__).resolve().parents[1])
-    page = AppTest.from_function(_token_page_script, default_timeout=30).run()
+    page = AppTest.from_function(_token_page_script, args=("leader",), default_timeout=30).run()
     assert not page.exception
     page.text_input[0].input("Claude Code")
     page.button[0].click().run()
@@ -339,10 +339,22 @@ def test_api_token_page_creates_and_revokes(tmp_path, monkeypatch):
     assert token.startswith("ameri_")
 
     store = Store(tmp_path / "ameri.sqlite3", tmp_path / "files")
-    assert store.api_token_login(token) == "anna"
-    assert [t.name for t in store.list_api_tokens("anna")] == ["Claude Code"]
+    assert store.api_token_login(token) == "boss"
+    assert [t.name for t in store.list_api_tokens("boss")] == ["Claude Code"]
 
     page.run()
     assert not any(c.value.startswith("ameri_") for c in page.code)  # токен показывается один раз
     next(b for b in page.button if b.label == "Отозвать").click().run()
     assert store.api_token_login(token) is None
+
+
+def test_manager_cannot_create_api_token(tmp_path, monkeypatch):
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setenv("AMERI_DATA_DIR", str(tmp_path))
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+    page = AppTest.from_function(_token_page_script, args=("manager",), default_timeout=30).run()
+    assert not page.exception
+    assert "Недостаточно прав" in page.error[0].value
+    assert not page.button and not page.text_input
+    assert Store(tmp_path / "ameri.sqlite3", tmp_path / "files").list_api_tokens() == []

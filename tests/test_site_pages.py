@@ -128,6 +128,17 @@ def test_calculation_questions_page_for_leader_only(site):
     assert "questions" not in {i.get("url_pathname") for i in manager._registered_pages.values()}
 
 
+def test_api_access_page_hidden_from_manager(site):
+    manager = open_app()
+    assert "api" not in {i.get("url_pathname") for i in manager._registered_pages.values()}
+
+    for user in (User("boss", "Руководитель", "leader", "x"), User("admin", "Админ", "admin", "x")):
+        at = AppTest.from_file(str(ROOT / "app" / "main.py"), default_timeout=60)
+        at.session_state["user"] = user
+        at.run()
+        assert "api" in {i.get("url_pathname") for i in at._registered_pages.values()}
+
+
 def test_settings_page_opens_for_admin(site):
     """Форма на странице «Настройки» не должна называться user: это имя занято вошедшим пользователем."""
 

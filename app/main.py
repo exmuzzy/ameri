@@ -95,8 +95,9 @@ work = [
     st.Page(howto.render_assistant, title="Как учится ассистент", icon=":material/auto_stories:", url_path="assistant"),
     st.Page(howto.render_roadmap, title="План развития", icon=":material/route:", url_path="roadmap"),
     materials_page,
-    st.Page(api_access.render, title="Доступ к API", icon=":material/key:", url_path="api"),
 ]
+if access.can(user, "api.tokens"):
+    work.append(st.Page(api_access.render, title="Доступ к API", icon=":material/key:", url_path="api"))
 lead = []
 if access.can(user, "stats.view"):
     lead.append(st.Page(quality.render, title="Качество", icon=":material/monitoring:", url_path="quality"))
