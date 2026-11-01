@@ -361,7 +361,11 @@ def test_xlsx_without_index_column_becomes_numbered_lines(tmp_path):
     sheet["A2"] = "№"
     numbered = tmp_path / "numbered.xlsx"
     book.save(numbered)
-    assert actions.spec_lines_text(numbered) is None  # с «№» позиции делит сам прототип
+    assert actions.spec_lines_text(numbered).splitlines() == [  # с «№» — тоже наш конвертер, номера не позиции
+        "Вытяжка В2, Северный цех.",
+        "1. Воздуховод из полипропилена ⌀200 — 8 мп; кол-во: 8",
+        "2. Зонт круглый 315 — 1 шт; кол-во: 1",
+    ]
 
 
 def test_unit_column_before_quantity_gives_number_then_unit(tmp_path):
@@ -766,18 +770,26 @@ def test_n_header_spec_goes_through_line_converter(tmp_path):
     assert "2 — 3 4 5 6" not in lines  # строка нумерации колонок — не позиция
 
 
-def test_prototype_number_header_spec_is_left_to_prototype(tmp_path):
-    """Шапка «№» — родная для прототипа: файл уходит ему целиком, конвертер отступает."""
+def test_number_header_spec_keeps_metre_unit(tmp_path):
+    """Шапка «№» + «Кол-во» + «Ед.»: прототип дописывал «Кол-во: 6» без единицы, и метраж то читался
+    метрами, то штуками (общий тест 01-11: воздуховоды не резались на 1500 + остаток). Конвертер
+    обязан передать «6 м» вместе с количеством, а номера строк в позиции не попадают."""
 
     import openpyxl
 
     book = openpyxl.Workbook()
     sheet = book.active
-    sheet.append(["№", "Наименование", "Ед.", "Кол-во"])
-    sheet.append([1, "Отвод 90 ф200", "шт", 3])
+    sheet.append(["№", "Наименование", "Кол-во", "Ед."])
+    sheet.append([1, "Воздуховод из коррозионностойкого полипропилена Ø250", 6, "м"])
+    sheet.append([2, "Воздуховод пластиковый 700х400 Тетра", 2, "м.п."])
+    sheet.append([3, "Отвод 90 ф200", 3, "шт"])
     path = tmp_path / "spec.xlsx"
     book.save(path)
-    assert actions.spec_lines_text(path) is None
+    assert actions.spec_lines_text(path).splitlines() == [
+        "1. Воздуховод из коррозионностойкого полипропилена Ø250 — 6 м; кол-во: 6",
+        "2. Воздуховод пластиковый 700х400 Тетра — 2 м.п.; кол-во: 2",
+        "3. Отвод 90 ф200 — 3 шт; кол-во: 3",
+    ]
     assert actions.stated_piece_quantity("4", "фланец 355") == 4
     assert actions.stated_piece_quantity("4", "фланец 355 — 2 шт") == 4
     assert actions.stated_piece_quantity("нет", "фланец 355 — 4 шт") == 4
