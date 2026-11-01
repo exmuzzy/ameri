@@ -27,7 +27,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 DEMO = ROOT / "demo"
-DEFAULT_URL = "https://159-194-254-146.sslip.io"
+DEFAULT_URL = "https://94-131-83-133.sslip.io"
 POST_TIMEOUT = 600  # расчётка идёт несколько минут
 ERROR_PREFIXES = (
     "Действие завершилось ошибкой",
