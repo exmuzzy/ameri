@@ -1402,56 +1402,6 @@ def _install_long_straight_as_nonstandard(pipeline) -> None:
     pipeline._straight_piece_adjustment = _straight_piece_adjustment
 
 
-QUANTITY_SUM_UNKNOWN = "В источнике не удалось определить сумму количеств"
-
-
-def _short_line(text: str, limit: int = 70) -> str:
-    plain = " ".join((text or "").split())
-    plain = re.sub(r"^\d+[.)]\s+", "", plain)
-    return plain if len(plain) <= limit else plain[: limit - 1].rstrip() + "…"
-
-
-def quantity_check_message(blocks, limit: int = 8) -> str | None:
-    """Вместо «не удалось определить сумму количеств» — какие строки файла сверить глазами.
-
-    Сумму количеств прототип считает по тексту строки («Кол-во: N», число с единицей). Одна строка без распознанного
-    количества — и контроля нет вовсе; общее сообщение не говорит, какая именно.
-    """
-
-    lines = [block for block in blocks if block.source_no is not None]
-    missing = [block for block in lines if block.quantity is None]
-    if not missing:
-        return None
-    if len(missing) == len(lines):
-        return (
-            "Контроль количеств не выполнен: ни у одной строки файла не распознано количество "
-            "(нет «Кол-во:» или единицы рядом с числом). Сверьте количества с файлом вручную."
-        )
-    shown = [f"№{block.source_no} «{_short_line(block.text)}»" for block in missing[:limit]]
-    if len(missing) > limit:
-        shown.append(f"…и ещё {len(missing) - limit}")
-    return "Контроль количеств не выполнен: не распознано количество в строках " + ", ".join(shown)
-
-
-def _install_quantity_check_message(pipeline) -> None:
-    """Сообщение проверки полноты называет строки без количества; остальные сообщения прототипа — как были."""
-
-    if not hasattr(pipeline, "compare_completeness"):
-        return
-    original = getattr(pipeline, "_ameri_original_completeness", None) or pipeline.compare_completeness
-    pipeline._ameri_original_completeness = original
-
-    def compare_completeness(source, response):
-        result = original(source, response)
-        if getattr(result, "message", None) == QUANTITY_SUM_UNKNOWN:
-            message = quantity_check_message(source.blocks)
-            if message:
-                result = replace(result, message=message)
-        return result
-
-    pipeline.compare_completeness = compare_completeness
-
-
 def compile_unclear_markers(markers) -> tuple:
     """Регулярные выражения «непонятных уточнений» клиента из params.yaml (`unclear_markers`)."""
 
@@ -1619,7 +1569,6 @@ def _install_harness(harness_dir: Path | None) -> None:
 
     params = duct_params(harness_dir)
     _install_unclear_markers(pipeline, params.get("unclear_markers"))
-    _install_quantity_check_message(pipeline)
     for key, attr in _KEYWORD_LISTS.items():
         base = getattr(pipeline, f"_ameri_original_{attr}", None) or getattr(pipeline, attr)
         setattr(pipeline, f"_ameri_original_{attr}", base)
