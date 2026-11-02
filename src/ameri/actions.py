@@ -1560,6 +1560,21 @@ def _install_rect_round_transition(pipeline) -> None:
     pipeline.transition_rect_round = transition_rect_round_area
 
 
+RECT_ROUND_TRANSITION_CATEGORY = "фасон цилиндр"
+
+
+def _install_rect_round_as_round_fitting(pipeline) -> None:
+    """Переход прямоугольник–круг — стандартный круглый фасон (раскрой 1,5, работа 2,7), а не нестандарт.
+
+    Прототип относил его к «нестандарт фасон» (работа 3). Решение заказчика 2026-11-02 (Q54).
+    """
+
+    categories = getattr(pipeline, "COEFFICIENT_CATEGORY", None)
+    if not isinstance(categories, dict) or "transition_rect_round" not in categories:
+        return
+    pipeline.COEFFICIENT_CATEGORY = {**categories, "transition_rect_round": RECT_ROUND_TRANSITION_CATEGORY}
+
+
 def _install_offset_rect_2(pipeline) -> None:
     """Утка в двух плоскостях: сторона a идёт со сдвигом h1, b — с h2 (ячейка M120 эталона).
 
@@ -1603,7 +1618,7 @@ def _install_harness(harness_dir: Path | None) -> None:
     ответвление круглого тройника — меньший диаметр из строки, прямик длиннее 1500 мм — нестандарт,
     метраж до 2 м включительно и «N шт по M м» не режутся на 1500 + остаток;
     формулы по эталонной расчётке: переход прямоугольник–круг с длиной, утка в двух плоскостях (a с h1, b с h2),
-    масса в колонке S по формуле шаблона.
+    масса в колонке S по формуле шаблона; переход прямоугольник–круг — круглый фасон (работа 2,7).
     """
 
     from duct_calc import pipeline
@@ -1616,6 +1631,7 @@ def _install_harness(harness_dir: Path | None) -> None:
     _install_long_straight_as_nonstandard(pipeline)
     _install_short_meters_as_one_piece(pipeline)
     _install_rect_round_transition(pipeline)
+    _install_rect_round_as_round_fitting(pipeline)
     _install_offset_rect_2(pipeline)
     _install_mass_formula()
 

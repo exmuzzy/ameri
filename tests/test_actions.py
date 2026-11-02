@@ -1440,6 +1440,64 @@ def test_rect_round_transition_area_uses_length_like_excel(real_duct_calc):
     assert short < 1.97 < long_
 
 
+def test_rect_round_transition_category_is_round_fitting():
+    """Решение заказчика 2026-11-02 (Q54): у перехода прямоугольник–круг категория «фасон цилиндр».
+    Остальные категории прототипа не меняются; без перехода в словаре обёртка ничего не делает."""
+
+    pipeline = _NS(COEFFICIENT_CATEGORY={
+        "transition_rect_round": "нестандарт фасон",
+        "tee_rect_round": "нестандарт фасон",
+        "transition_round_round": "фасон цилиндр",
+    })
+    original = pipeline.COEFFICIENT_CATEGORY
+    actions._install_rect_round_as_round_fitting(pipeline)
+    actions._install_rect_round_as_round_fitting(pipeline)
+    assert pipeline.COEFFICIENT_CATEGORY == {
+        "transition_rect_round": "фасон цилиндр",
+        "tee_rect_round": "нестандарт фасон",
+        "transition_round_round": "фасон цилиндр",
+    }
+    assert original["transition_rect_round"] == "нестандарт фасон"  # словарь прототипа не правится на месте
+    old = _NS(COEFFICIENT_CATEGORY={"straight_round": "прямик цилиндр"})
+    actions._install_rect_round_as_round_fitting(old)
+    assert old.COEFFICIENT_CATEGORY == {"straight_round": "прямик цилиндр"}
+
+
+def test_rect_round_transition_gets_round_fitting_coefficients(real_duct_calc):
+    """Переход прямоугольник–круг в расчётке — раскрой 1,5 и работа 2,7, как круглый переход, а не 3.
+    Площадь при этом считается прежней формулой перехода прямоугольник–круг."""
+
+    from decimal import Decimal
+
+    actions._install_harness(None)
+    actions._install_harness(None)
+    from duct_calc import pipeline
+    from duct_calc.coefficients import CoefficientTable
+    from duct_calc.model_schema import parse_model_response
+
+    if not pipeline.DEFAULT_TEMPLATE_PATH.is_file():
+        pytest.skip("нет шаблона расчётки")
+    coefficients = CoefficientTable.from_workbook(pipeline.DEFAULT_TEMPLATE_PATH)
+
+    def row(text, element_type, size, roles):
+        raw = {"source_no": "1", "source_text": text, "element_type": element_type, "qty": 2, "size": size,
+               "length_mm": 300, "ends": [{"role": r, "connection": "flange"} for r in roles]}
+        position = parse_model_response({"positions": [raw]}).positions[0]
+        return pipeline.position_to_output_row(position, coefficients, connection_type="flange")
+
+    def lm(output):
+        return (Decimal(str(output.l)), Decimal(str(output.m)))
+
+    rect_round = row("Переход 600х400/ф500", "transition_rect_round", {"a": 600, "b": 400, "d_out": 500}, ("rect", "round"))
+    round_round = row("Переход ф500/ф400", "transition_round_round", {"d_in": 500, "d_out": 400}, ("in", "out"))
+    assert lm(rect_round) == (Decimal("1.5"), Decimal("2.7"))
+    assert lm(rect_round) == lm(round_round)
+    assert float(rect_round.area_m2) == 0.70
+    tee = row("Тройник 600х400/ф250", "tee_rect_round", {"a": 600, "b": 400, "branch_d": 250, "branch_length": 500},
+              ("main_in", "main_out", "branch"))
+    assert lm(tee) == (Decimal("1.5"), Decimal("3"))
+
+
 def test_offset_rect_2_pairs_a_with_first_shift_like_excel(real_duct_calc):
     """Утка в двух плоскостях: a со сдвигом h1, b со сдвигом h2 (M120 эталона); при a≠b и h1≠h2 это видно."""
 
