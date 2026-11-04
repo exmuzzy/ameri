@@ -151,6 +151,10 @@ def test_repository_materials_are_valid():
             assert re.search(r"https?://|Источник: правила расчётки компании", section.text), (
                 f"{material.path}: у раздела «{section.title}» нет источника"
             )
+            # Длиннее лимита подкладки — хвост раздела (в том числе «Источник») обрежется до ответа ассистента.
+            assert len(section.text) <= materials.MAX_SECTION_CHARS, (
+                f"{material.path}: раздел «{section.title}» — {len(section.text)} знаков, лимит {materials.MAX_SECTION_CHARS}"
+            )
     for path in [*HARNESS.glob("rules/*.md"), *HARNESS.glob("examples/*.md"), *HARNESS.glob("prompts/*.md")]:
         for label, url in re.findall(r"\[([^\]]+)\]\((/materials\?[^)\s]+)\)", path.read_text(encoding="utf-8")):
             shown, links = materials.split_links(f"[{label}]({url})", loaded)
