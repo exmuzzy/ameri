@@ -84,6 +84,30 @@ def test_attachment_has_download_and_preview(site):
     assert "привет мир" in preview_bodies
 
 
+def test_drawing_layout_hides_connection_selector(site, monkeypatch):
+    """«Спецификация с чертежа» — склейка без расчёта: тип соединения не нужен и не показывается."""
+
+    from ameri import actions
+
+    monkeypatch.setattr(actions, "duct_calc_available", lambda _dir: True)
+    chat_id = site.create_chat("Чертёж", "anna")
+    at = open_app(chat=str(chat_id))
+    assert [s.label for s in at.selectbox] == []  # «Вопрос ассистенту»: ни вида, ни соединения
+
+    at.segmented_control[0].set_value("Расчётка воздуховодов").run()
+    assert not at.exception
+    assert [s.label for s in at.selectbox] == ["Вид спецификации", "Тип соединения"]
+    assert at.selectbox[0].value == "Обычная таблица"
+
+    at.selectbox[0].set_value("Спецификация с чертежа").run()
+    assert not at.exception
+    assert [s.label for s in at.selectbox] == ["Вид спецификации"]
+    assert any("отправьте её на расчётку видом «Обычная таблица»" in c.value for c in at.caption)
+
+    at.selectbox[0].set_value("Обычная таблица").run()
+    assert [s.label for s in at.selectbox] == ["Вид спецификации", "Тип соединения"]
+
+
 def test_materials_page_shows_linked_section(site):
     at = open_app("materials", doc="chemical-resistance", section="acids")
     assert not at.exception

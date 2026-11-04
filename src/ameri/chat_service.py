@@ -64,11 +64,25 @@ def run_action(
     action: str,
     connection: str | None,
     names: dict[str, str],
+    spec_layout: str = actions.SPEC_LAYOUT_PLAIN,
 ) -> Message:
-    """Выполнить действие по сообщению пользователя и записать ответ Ассистента в Чат."""
+    """Выполнить действие по сообщению пользователя и записать ответ Ассистента в Чат.
+
+    `spec_layout="drawing"` — расчётка не запускается: чертёжный лист только склеивается кодом
+    в плоский `.xlsx` на проверку (без модели и без ключа).
+    """
 
     try:
-        if action == ACTION_DUCT:
+        if action == ACTION_DUCT and spec_layout == actions.SPEC_LAYOUT_DRAWING:
+            drawings = [a for a in message.attachments if a.path.suffix.lower() == ".xlsx"]
+            if drawings:
+                result = actions.assemble_drawing_spec(drawings[0])
+            else:
+                result = actions.ActionResult(
+                    "Для сборки приложите чертёжную спецификацию в формате .xlsx. "
+                    "Обычную таблицу или список позиций считайте видом «Обычная таблица»."
+                )
+        elif action == ACTION_DUCT:
             specs = [a for a in message.attachments if a.path.suffix.lower() in actions.DUCT_SUFFIXES]
             if specs:
                 result = actions.duct_calc(
@@ -138,6 +152,7 @@ def post_message(
     connection: str | None,
     files: list[tuple[str, bytes]],
     names: dict[str, str],
+    spec_layout: str = actions.SPEC_LAYOUT_PLAIN,
 ) -> PostResult | None:
     """То, что делает кнопка отправки в Чате: сообщение пользователя, затем действие Ассистента.
 
@@ -157,7 +172,7 @@ def post_message(
     )
     answer = None
     if action != ACTION_NOTE:
-        answer = run_action(store, settings, chat, message, action, connection, names)
+        answer = run_action(store, settings, chat, message, action, connection, names, spec_layout)
     return PostResult(message, answer)
 
 
