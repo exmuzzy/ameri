@@ -212,8 +212,17 @@ def _chat_column(chat: Chat) -> None:
         left, right = st.columns([2, 1])
         action = left.segmented_control("Действие", options, default=options[0]) or options[0]
         connection = None
+        spec_layout = actions.SPEC_LAYOUT_PLAIN
         if action == ACTION_DUCT:
-            connection = right.selectbox("Тип соединения", list(actions.CONNECTION_TYPES))
+            layout_label = right.selectbox("Вид спецификации", list(actions.SPEC_LAYOUTS))
+            spec_layout = actions.SPEC_LAYOUTS[layout_label]
+            if spec_layout == actions.SPEC_LAYOUT_DRAWING:
+                right.caption(
+                    "Шаг 1: склейка кодом, без модели. Вернётся таблица на проверку — "
+                    "отправьте её на расчётку видом «Обычная таблица»."
+                )
+            else:
+                connection = right.selectbox("Тип соединения", list(actions.CONNECTION_TYPES))
 
         submitted = st.chat_input(
             "Сообщение",
@@ -231,6 +240,7 @@ def _chat_column(chat: Chat) -> None:
                 text=submitted.text or "",
                 action=action,
                 connection=connection,
+                spec_layout=spec_layout,
                 files=files,
                 names={login: u.name for login, u in get_users().items()},
             )

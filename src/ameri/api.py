@@ -306,6 +306,7 @@ def create_app(settings_factory=load_settings) -> FastAPI:
         text: Annotated[str, Form()] = "",
         action: Annotated[str, Form()] = "note",
         connection: Annotated[str, Form()] = "none",
+        spec_layout: Annotated[str, Form()] = actions.SPEC_LAYOUT_PLAIN,
         files: Annotated[list[UploadFile], File()] = [],  # noqa: B006 - FastAPI копирует значение по умолчанию
     ) -> dict:
         chat = open_chat(store, access, user, chat_id)
@@ -313,6 +314,8 @@ def create_app(settings_factory=load_settings) -> FastAPI:
             raise HTTPException(422, f"action — одно из: {', '.join(chat_service.ACTION_KEYS)}")
         if connection not in CONNECTIONS:
             raise HTTPException(422, f"connection — одно из: {', '.join(CONNECTIONS)}")
+        if spec_layout not in actions.SPEC_LAYOUTS.values():
+            raise HTTPException(422, f"spec_layout — одно из: {', '.join(actions.SPEC_LAYOUTS.values())}")
         label = chat_service.ACTION_KEYS[action]
         if label not in chat_service.available_actions(access, user, settings):
             raise HTTPException(403, f"Действие {action} недоступно")
@@ -327,6 +330,7 @@ def create_app(settings_factory=load_settings) -> FastAPI:
             connection=CONNECTIONS[connection] if label == chat_service.ACTION_DUCT else None,
             files=uploads,
             names=names(settings),
+            spec_layout=spec_layout,
         )
         if posted is None:
             raise HTTPException(422, "Пустое сообщение: нужен текст или файл")

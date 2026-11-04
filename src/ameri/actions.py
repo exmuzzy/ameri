@@ -14,6 +14,7 @@ from dataclasses import dataclass, field, is_dataclass, replace
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
+from . import drawing_spec
 from .llm import DEEPSEEK_TIMEOUT, NO_CONNECTION_MESSAGE, DeepSeekChat, key_problem
 from .materials import MAX_SECTIONS, Material, find_sections, sections_context
 from .store import Attachment, Message, Usage
@@ -23,6 +24,10 @@ PARSED_SUFFIXES = {".xlsx", ".docx", ".doc"}
 DUCT_SUFFIXES = {".md", ".xlsx", ".docx", ".doc", ".csv", ".odt"}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
 CONNECTION_TYPES = {"Фланец": "flange", "Раструб": "socket", "Без соединения": "none"}
+# Вид спецификации при расчётке выбирает менеджер. «С чертежа» — только склейка и файл на проверку, без модели.
+SPEC_LAYOUT_PLAIN = "plain"
+SPEC_LAYOUT_DRAWING = "drawing"
+SPEC_LAYOUTS = {"Обычная таблица": SPEC_LAYOUT_PLAIN, "Спецификация с чертежа": SPEC_LAYOUT_DRAWING}
 DUCT_TEMPLATE_NAME = "шаблон расчетки стоимости воздуховодов.xlsx"
 MAX_FILE_CHARS = 60_000
 # Бюджет истории Чата в символах (~40–50 тыс. токенов): старые сообщения отбрасываются первыми.
@@ -1816,3 +1821,29 @@ def duct_calc(
         if warnings:
             lines.append("Предупреждения: " + "; ".join(warnings))
         return ActionResult(text="\n\n".join(lines), files=[(output.name, output.read_bytes())])
+
+
+def _positions_word(count: int) -> str:
+    if count % 100 in range(11, 15):
+        return "позиций"
+    return {1: "позиция", 2: "позиции", 3: "позиции", 4: "позиции"}.get(count % 10, "позиций")
+
+
+def assemble_drawing_spec(spec: Attachment) -> ActionResult:
+    """Шаг 1 для чертёжной спецификации: склейка позиций кодом, плоский `.xlsx` на проверку.
+
+    Модель и прототип не вызываются, ключ не нужен. Менеджер правит таблицу и сам шлёт её
+    на расчётку видом «Обычная таблица» — как любую плоскую заявку.
+    """
+
+    try:
+        positions = drawing_spec.assemble_positions(spec.path)
+    except drawing_spec.DrawingSpecError as error:
+        return ActionResult(str(error))
+    count = len(positions)
+    text = (
+        f"Собрали плоскую спецификацию ({count} {_positions_word(count)}) из файла «{spec.name}». "
+        "Модель его не разбирала и не считала. Проверьте таблицу и отправьте её на расчётку "
+        "видом «Обычная таблица»."
+    )
+    return ActionResult(text, files=[(drawing_spec.flat_name(spec.name), drawing_spec.flat_xlsx(positions))])

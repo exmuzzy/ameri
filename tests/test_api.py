@@ -170,6 +170,79 @@ def test_download_xlsx_answer(env):
     assert openpyxl.load_workbook(io.BytesIO(content)).active["A1"].value == "расчётка"
 
 
+def _drawing_xlsx() -> bytes:
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.append([None, None, "Позиция", "Наименование и техническая характеристика", "Тип, марка", "Единица измерения", "Количество"])
+    sheet.append([None, None, None, "Система В5", None, None, None])
+    sheet.append([None, None, None, "4. Переход пластиковый,", "ХИМВЕНТ-ПП-БС-125-110-", "шт.", 2])
+    sheet.append([None, None, None, "∅125 / ∅110", "-100-3-ММ", None, None])
+    data = io.BytesIO()
+    book.save(data)
+    return data.getvalue()
+
+
+def test_spec_layout_drawing_assembles_without_model_and_connection(env, monkeypatch):
+    """spec_layout=drawing: файл-спецификация вместо расчётки, соединение не нужно, DeepSeek не вызывается."""
+
+    from ameri import actions
+
+    client, _ = env
+    monkeypatch.setattr(actions, "duct_calc_available", lambda _dir: True)
+
+    def forbidden(**_):
+        raise AssertionError("расчётка на чертёжном листе не вызывается")
+
+    monkeypatch.setattr(actions, "duct_calc", forbidden)
+    anna = login(client, "anna")
+    chat = client.post("/api/v1/chats", json={"title": "t"}, headers=anna).json()
+
+    response = client.post(
+        f"/api/v1/chats/{chat['id']}/messages",
+        data={"action": "duct_calc", "spec_layout": "drawing", "text": "собери"},
+        files=[("files", ("чертёж.xlsx", _drawing_xlsx(), "application/octet-stream"))],
+        headers=anna,
+    )
+
+    assert response.status_code == 201, response.text
+    answer = response.json()["assistant_message"]
+    assert answer["content"].startswith("Собрали плоскую спецификацию (1 позиция) из файла «чертёж.xlsx».")
+    assert [a["name"] for a in answer["attachments"]] == ["спецификация_чертёж.xlsx"]
+    assert FakeLlm.calls == []
+    flat = client.get(f"/api/v1/files/{answer['attachments'][0]['id']}", headers=anna).content
+    rows = [r for r in openpyxl.load_workbook(io.BytesIO(flat)).active.iter_rows(values_only=True) if any(r)]
+    assert rows[-1][0] == "Переход пластиковый, ∅125 / ∅110 ХИМВЕНТ-ПП-БС-125-110-100-3-ММ"
+
+
+def test_spec_layout_defaults_to_plain_and_is_validated(env, monkeypatch):
+    from ameri import actions
+
+    client, _ = env
+    monkeypatch.setattr(actions, "duct_calc_available", lambda _dir: True)
+    seen = []
+
+    def fake_duct_calc(**kwargs):
+        seen.append(kwargs["connection_label"])
+        return actions.ActionResult("посчитано")
+
+    monkeypatch.setattr(actions, "duct_calc", fake_duct_calc)
+    anna = login(client, "anna")
+    chat = client.post("/api/v1/chats", json={"title": "t"}, headers=anna).json()
+    url = f"/api/v1/chats/{chat['id']}/messages"
+    spec = [("files", ("spec.xlsx", _drawing_xlsx(), "application/octet-stream"))]
+
+    default = client.post(url, data={"action": "duct_calc", "connection": "socket"}, files=spec, headers=anna)
+    explicit = client.post(
+        url, data={"action": "duct_calc", "connection": "flange", "spec_layout": "plain"}, files=spec, headers=anna
+    )
+    wrong = client.post(url, data={"action": "duct_calc", "spec_layout": "что-то"}, files=spec, headers=anna)
+
+    assert default.json()["assistant_message"]["content"] == "посчитано"
+    assert explicit.json()["assistant_message"]["content"] == "посчитано"
+    assert seen == ["Раструб", "Фланец"]
+    assert wrong.status_code == 422 and "spec_layout" in wrong.text
+
+
 def test_feedback_only_for_leader(env):
     client, _ = env
     anna, boss = login(client, "anna"), login(client, "boss")
