@@ -126,6 +126,26 @@ def test_assistant_article_page(site):
     assert ("Открыть материалы отрасли", "materials") in links
 
 
+def test_howto_page_offers_sample_calc_input(site):
+    """Образец входного xlsx на расчётку скачивается со страницы «Как работать», а в статье описан порядок колонок."""
+
+    at = open_app("howto")
+    assert not at.exception
+    text = "\n".join(m.value for m in at.markdown)
+    assert "Номенклатура, Длина, Толщина, Количество, Единица измерения" in text
+    assert [d.label for d in at.download_button] == ["Скачать образец входного файла для расчётки"]
+    sample = ROOT / "docs" / "site" / "sample_calc_input.xlsx"
+    assert sample.is_file()
+
+    import openpyxl
+
+    book = openpyxl.load_workbook(sample)
+    assert book.sheetnames == ["Таблица"]
+    header = [cell.value.strip() for cell in book.active[1] if cell.value]
+    assert header == ["№ п/п", "Номенклатура", "Длина, мм", "Толщина материала в мм", "Кол-во", "Ед.изм."]
+    assert not book.properties.creator and not book.properties.lastModifiedBy
+
+
 def test_roadmap_article_page(site):
     at = open_app("roadmap")
     assert not at.exception
