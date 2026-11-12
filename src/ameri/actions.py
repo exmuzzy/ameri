@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 import httpx
 import yaml
 from dataclasses import dataclass, field, is_dataclass, replace
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from . import drawing_spec
@@ -1191,18 +1191,30 @@ def _install_catalog_line_rules(pipeline) -> None:
         pipeline._item_head = lambda source_text: original_head(item_name(source_text))
 
 
+ROUND_FLANGE_PRICE_STEP = Decimal(25)
+
+
+def ceil_to_25(price):
+    """Цена вверх до ближайшего кратного 25 ₽ (круглые фланцы, решение заказчика 2026-11-12, Q56)."""
+
+    if price is None:
+        return None
+    price = Decimal(str(price))
+    return (price / ROUND_FLANGE_PRICE_STEP).to_integral_value(rounding=ROUND_CEILING) * ROUND_FLANGE_PRICE_STEP
+
+
 def round_flange_price(d_mm, thickness_mm, material_price) -> Decimal | None:
     """Цена одного круглого фланца не из прайса: с листа 4,5 м², по диаметру фланца (+159 мм — полка и отход).
 
     С диаметром фланца формула повторяет число фланцев с листа из прайса шаблона (⌀110–650).
-    None — если с листа не выходит ни одного фланца.
+    Цена одного фланца — вверх до кратного 25 ₽. None — если с листа не выходит ни одного фланца.
     """
 
     sheet_price = Decimal(str(thickness_mm)) * Decimal("4.5") * Decimal("0.92") * Decimal(str(material_price))
     per_sheet = (Decimal(7_000_000) / (Decimal(str(d_mm)) + 159) ** 2).quantize(Decimal(1), rounding=ROUND_HALF_UP)
     if per_sheet == 0:
         return None
-    return (sheet_price / per_sheet * Decimal("1.6")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return ceil_to_25(sheet_price / per_sheet * Decimal("1.6"))
 
 
 def round_flange_sheet_thickness(d_mm) -> Decimal:
@@ -1244,6 +1256,7 @@ def _install_flange_price(material_price: Decimal) -> None:
     Круглый фланец не из прайса — по цене листа, толщиной как в прайсе шаблона. Прямоугольный — по таблице
     толщин фланцев; фланцы 401–449 мм — 6 мм, как до 400: в таблице прототипа этих размеров нет.
     Толщина стенки из спецификации или от модели на фланец не переносится.
+    Круглый фланец — и из прайса, и по формуле — стоит кратно 25 ₽ за штуку, пара вдвое дороже.
     """
 
     from duct_calc import flanges, thickness
@@ -1257,12 +1270,13 @@ def _install_flange_price(material_price: Decimal) -> None:
     flanges._ameri_original_pair_price = original
 
     def pair_price(self, end, *, explicit_flange_thickness_mm=None):
-        if end.kind != "round" or end.dimensions[0] in self.round_prices:
+        if end.kind != "round":
             return original(self, end)
         d = end.dimensions[0]
-        one = round_flange_price(d, round_flange_sheet_thickness(d), material_price)
+        one = None if d in self.round_prices else round_flange_price(d, round_flange_sheet_thickness(d), material_price)
         if one is None:
-            return original(self, end)
+            pair = original(self, end)
+            return replace(pair, price=ceil_to_25(pair.price / 2) * 2)
         return flanges.PairPrice(one * 2, "calculated", f"{d.normalize():f}")
 
     flanges.FlangePriceBook.pair_price = pair_price
@@ -1457,9 +1471,45 @@ def _install_short_meters_as_one_piece(pipeline) -> None:
             return [row]
         l_value, m_value = coefficients.for_element(LONG_STRAIGHT_CATEGORY, length_mm=total_mm)
         multiplier = getattr(pipeline, "_special_price_multiplier", lambda text: Decimal(1))(position.source_text or "")
-        return [replace(row, l=Decimal(str(l_value)) * multiplier, m=m_value)]
+        return [replace(row, l=Decimal(str(l_value)) * multiplier, m=thin_wall_work_m(m_value, row.thickness_mm))]
 
     pipeline._meter_segment_rows = _meter_segment_rows
+
+
+THIN_WALL_MM = Decimal(2)
+THIN_WALL_WORK_EXTRA = Decimal("0.15")
+
+
+def thin_wall_work_m(m, thickness_mm):
+    """Коэффициент на работу при стенке ровно 2 мм — на 0,15 больше (решение заказчика 2026-11-12, Q55)."""
+
+    if m is None or thickness_mm is None or Decimal(str(thickness_mm)) != THIN_WALL_MM:
+        return m
+    return Decimal(str(m)) + THIN_WALL_WORK_EXTRA
+
+
+def _install_thin_wall_work(pipeline) -> None:
+    """Стенка 2 мм — работа + 0,15 у любой рассчитанной строки: прямика, фасона, нестандарта, шибера, клапана, врезки.
+
+    Ставится последней обёрткой `position_to_output_row`: шибер, клапан и врезка задают M в прототипе мимо таблицы
+    коэффициентов. Метраж 1,5–2 м перезаписывает M после этой обёртки и добавляет надбавку сам.
+    """
+
+    if not hasattr(pipeline, "position_to_output_row"):
+        return
+    current = pipeline.position_to_output_row
+    # Обёртку соединений `_install_harness` ставит заново перед этой, поэтому снимаем только свою.
+    original = getattr(current, "_ameri_thin_wall_inner", current)
+
+    def position_to_output_row(*args, **kwargs):
+        row = original(*args, **kwargs)
+        m = getattr(row, "m", None)
+        if getattr(row, "purchased", False) or m is None or not is_dataclass(row):
+            return row
+        return replace(row, m=thin_wall_work_m(m, row.thickness_mm))
+
+    position_to_output_row._ameri_thin_wall_inner = original
+    pipeline.position_to_output_row = position_to_output_row
 
 
 def compile_unclear_markers(markers) -> tuple:
@@ -1623,7 +1673,8 @@ def _install_harness(harness_dir: Path | None) -> None:
     ответвление круглого тройника — меньший диаметр из строки, прямик длиннее 1500 мм — нестандарт,
     метраж до 2 м включительно и «N шт по M м» не режутся на 1500 + остаток;
     формулы по эталонной расчётке: переход прямоугольник–круг с длиной, утка в двух плоскостях (a с h1, b с h2),
-    масса в колонке S по формуле шаблона; переход прямоугольник–круг — круглый фасон (работа 2,7).
+    масса в колонке S по формуле шаблона; переход прямоугольник–круг — круглый фасон (работа 2,7);
+    стенка 2 мм — работа + 0,15.
     """
 
     from duct_calc import pipeline
@@ -1639,6 +1690,7 @@ def _install_harness(harness_dir: Path | None) -> None:
     _install_rect_round_as_round_fitting(pipeline)
     _install_offset_rect_2(pipeline)
     _install_mass_formula()
+    _install_thin_wall_work(pipeline)
 
     original = getattr(pipeline, "_ameri_original_prompt", None) or pipeline.build_system_prompt
     pipeline._ameri_original_prompt = original

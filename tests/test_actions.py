@@ -1094,17 +1094,45 @@ def test_round_flange_price_from_sheet_by_outer_edge():
 
     from decimal import Decimal
 
-    # ⌀370: 7 000 000 / 529² = 25,01 → 25 с листа.
-    assert actions.round_flange_price(370, 6, 200) == Decimal("317.95")
-    # ⌀420: 7 000 000 / 579² = 20,88 → 21 с листа (с округлением вниз было бы 20 и 397,44).
-    assert actions.round_flange_price(420, 6, 200) == Decimal("378.51")
-    # ⌀1100, фланец 12 мм: 7 000 000 / 1259² = 4,42 → 4 с листа.
-    assert actions.round_flange_price(1100, 12, 200) == Decimal("3974.40")
-    # Толщина и цена материала входят в цену листа прямо пропорционально.
-    assert actions.round_flange_price(370, 8, 200) == Decimal("423.94")
-    assert actions.round_flange_price(370, 6, 100) == Decimal("158.98")
+    # Цена одного фланца — вверх до кратного 25 ₽ (Q56).
+    # ⌀370: 7 000 000 / 529² = 25,01 → 25 с листа; 317,95 → 325.
+    assert actions.round_flange_price(370, 6, 200) == Decimal("325")
+    # ⌀420: 7 000 000 / 579² = 20,88 → 21 с листа: 567,77 → 575 (с округлением вниз было бы 20 и 596,16 → 600).
+    assert actions.round_flange_price(420, 6, 300) == Decimal("575")
+    # ⌀1100, фланец 12 мм: 7 000 000 / 1259² = 4,42 → 4 с листа; 3974,40 → 3975.
+    assert actions.round_flange_price(1100, 12, 200) == Decimal("3975")
+    # Толщина и цена материала входят в цену листа: 423,94 → 425; 158,98 → 175.
+    assert actions.round_flange_price(370, 8, 200) == Decimal("425")
+    assert actions.round_flange_price(370, 6, 100) == Decimal("175")
     # С листа не выходит ни одного фланца — новой формулой не считается.
     assert actions.round_flange_price(4000, 12, 200) is None
+
+
+def test_ceil_to_25_rounds_price_up_to_multiple_of_25():
+    """Q56: цена круглого фланца — вверх до ближайшего кратного 25 ₽; кратная 25 не меняется, вниз — никогда."""
+
+    from decimal import Decimal
+
+    assert actions.ceil_to_25(Decimal("317.95")) == Decimal("325")
+    assert actions.ceil_to_25(Decimal("300.01")) == Decimal("325")
+    assert actions.ceil_to_25(Decimal("325")) == Decimal("325")
+    assert actions.ceil_to_25(Decimal("325.00")) == Decimal("325")
+    assert actions.ceil_to_25(0) == 0
+    assert actions.ceil_to_25(None) is None
+
+
+def test_thin_wall_work_m_adds_015_only_at_exactly_2_mm():
+    """Q55: стенка ровно 2 мм — коэффициент на работу + 0,15 к любому текущему; 2,3 и 3 мм — без надбавки."""
+
+    from decimal import Decimal
+
+    assert actions.thin_wall_work_m(Decimal("2.4"), 2) == Decimal("2.55")
+    assert actions.thin_wall_work_m(Decimal("2.7"), Decimal("2.0")) == Decimal("2.85")
+    assert actions.thin_wall_work_m(3, 2) == Decimal("3.15")
+    assert actions.thin_wall_work_m(Decimal("2.4"), 3) == Decimal("2.4")
+    assert actions.thin_wall_work_m(Decimal("2.4"), 2.3) == Decimal("2.4")
+    assert actions.thin_wall_work_m(Decimal("2.4"), None) == Decimal("2.4")
+    assert actions.thin_wall_work_m(None, 2) is None
 
 
 DUCT_CALC_SRC = Path(__file__).resolve().parents[1] / "duct-calc" / "src"
@@ -1156,21 +1184,30 @@ def test_round_flange_not_in_price_list_uses_sheet_price(real_duct_calc, tmp_pat
         return DEFAULT_PRICE_BOOK.pair_price(end, **kwargs)
 
     d370 = ConnectionEnd.round(370, "flange")
-    assert price(d370).price == Decimal("635.90")  # пара = 2 × 317,95
+    assert price(d370).price == Decimal("650")  # пара = 2 × 325 (317,95 вверх до 25)
     assert price(d370).source == "calculated"
-    assert flange_cost([d370] * 4) == Decimal("1271.80")  # 4 конца — 2 пары
-    assert actions.connection_unit_cost("flange", "round", (370,)) == Decimal("317.95")
+    assert flange_cost([d370] * 4) == Decimal("1300")  # 4 конца — 2 пары
+    assert actions.connection_unit_cost("flange", "round", (370,)) == Decimal("325")  # отдельный фланец
     # Толщина стенки отвода (3 мм от модели или из строки) не делает фланец тоньше: он 6 мм.
     assert price(d370, explicit_flange_thickness_mm=3) == price(d370)
-    assert flange_cost([d370] * 2, explicit_flange_thickness_mm=3) == Decimal("635.90")
+    assert flange_cost([d370] * 2, explicit_flange_thickness_mm=3) == Decimal("650")
 
-    for end in (ConnectionEnd.round(355, "flange"), ConnectionEnd.rect(550, 350, "flange"), ConnectionEnd.rect(600, 300, "flange")):
+    # Круглый из прайса: один фланец (половина пары прайса) — вверх до 25 ₽, пара вдвое; цены прайса в тест не пишем.
+    d355 = ConnectionEnd.round(355, "flange")
+    raw355 = original(DEFAULT_PRICE_BOOK, d355)
+    assert price(d355).price == actions.ceil_to_25(raw355.price / 2) * 2
+    assert price(d355).price % 50 == 0 and raw355.price <= price(d355).price < raw355.price + 50
+    assert price(d355).source == "table"
+    assert price(d355, explicit_flange_thickness_mm=3) == price(d355)
+    assert actions.connection_unit_cost("flange", "round", (355,)) % 25 == 0
+
+    # Прямоугольные фланцы не округляются — как у прототипа.
+    for end in (ConnectionEnd.rect(550, 350, "flange"), ConnectionEnd.rect(600, 300, "flange")):
         assert price(end) == original(DEFAULT_PRICE_BOOK, end), end
         assert price(end, explicit_flange_thickness_mm=3) == original(DEFAULT_PRICE_BOOK, end), end
     assert original(DEFAULT_PRICE_BOOK, ConnectionEnd.rect(550, 350, "flange"), explicit_flange_thickness_mm=3) != (
         price(ConnectionEnd.rect(550, 350, "flange"))
     )  # у прототипа толщина стенки меняла цену прямоугольного фланца не из прайса
-    assert price(ConnectionEnd.round(355, "flange")).source == "table"
 
     # Фланцы 401–449 мм — 6 мм, как до 400; раньше таблица прототипа на них останавливалась с вопросом.
     from duct_calc.thickness import flange_thickness
@@ -1182,8 +1219,8 @@ def test_round_flange_not_in_price_list_uses_sheet_price(real_duct_calc, tmp_pat
     # Круглый фланец не из прайса — толщиной как в прайсе шаблона: до 800 мм — 6, от 800 — 8,
     # а не 8/10/12 мм по таблице: иначе ⌀600 выходил дороже ⌀630 из прайса.
     assert [actions.round_flange_sheet_thickness(d) for d in (370, 600, 799, 800, 850, 1100)] == [6, 6, 6, 8, 8, 8]
-    assert price(ConnectionEnd.round(600, "flange")).price == Decimal("1324.80")  # 12 с листа, 6 мм
-    assert price(ConnectionEnd.round(1100, "flange")).price == Decimal("5299.20")  # 4 с листа, 8 мм
+    assert price(ConnectionEnd.round(600, "flange")).price == Decimal("1350")  # 12 с листа, 6 мм: 662,40 → 675
+    assert price(ConnectionEnd.round(1100, "flange")).price == Decimal("5300")  # 4 с листа, 8 мм: 2649,60 → 2650
     assert price(ConnectionEnd.round(850, "flange")).price == 2 * actions.round_flange_price(850, 8, 200)
 
 
@@ -1343,21 +1380,24 @@ def test_long_straight_is_nonstandard_whatever_the_quantity(real_duct_calc):
         return (Decimal(str(row.l)), Decimal(str(row.m)))
 
     nonstandard = (Decimal("1.5"), Decimal("3"))
-    assert lm(straight("Воздуховод ПНД ф150 L2000 фф — 7 шт", {"d": 150}, 7, 2000)[1]) == nonstandard
-    assert lm(straight("Воздуховод ПНД ф150 L2000 фф — 1 шт", {"d": 150}, 1, 2000)[1]) == nonstandard
+    # ⌀150 — стенка 2 мм по таблице, работа + 0,15 (Q55); у 500×300 стенка 5 мм — без надбавки.
+    nonstandard_2mm = (Decimal("1.5"), Decimal("3.15"))
+    assert lm(straight("Воздуховод ПНД ф150 L2000 фф — 7 шт", {"d": 150}, 7, 2000)[1]) == nonstandard_2mm
+    assert lm(straight("Воздуховод ПНД ф150 L2000 фф — 1 шт", {"d": 150}, 1, 2000)[1]) == nonstandard_2mm
     assert lm(straight("Воздуховод 500х300 L2000 — 4 шт", {"a": 500, "b": 300}, 4, 2000)[1]) == nonstandard
-    # Ровно 1500 и короче — как в шаблоне, правило их не трогает.
-    assert lm(straight("Воздуховод ПНД ф150 L1500 фф — 3 шт", {"d": 150}, 3, 1500)[1]) == (Decimal("1.2"), Decimal("2.4"))
-    assert lm(straight("Воздуховод ПНД ф150 L1350 фф — 3 шт", {"d": 150}, 3, 1350)[1]) == (Decimal("1.3"), Decimal("2.4"))
+    # Ровно 1500 и короче — коэффициенты шаблона (2,4) плюс надбавка за 2 мм.
+    assert lm(straight("Воздуховод ПНД ф150 L1500 фф — 3 шт", {"d": 150}, 3, 1500)[1]) == (Decimal("1.2"), Decimal("2.55"))
+    assert lm(straight("Воздуховод ПНД ф150 L1350 фф — 3 шт", {"d": 150}, 3, 1350)[1]) == (Decimal("1.3"), Decimal("2.55"))
+    assert lm(straight("Воздуховод ф400 L1500 — 3 шт", {"d": 400}, 3, 1500)[1]) == (Decimal("1.2"), Decimal("2.4"))
 
-    # Погонаж режется по 1500 и остаток — куски не длиннее 1500, коэффициенты обычные.
+    # Погонаж режется по 1500 и остаток — куски не длиннее 1500, коэффициенты обычные; надбавка — один раз.
     position, _ = straight("Воздуховод ПНД ф150 — 3,2 м", {"d": 150}, 1, None)
     rows = pipeline._meter_segment_rows(
         position, coefficients, total_meters=Decimal("3.2"), system=None, connection_type="flange"
     )
     assert [(row.length_mm, lm(row)) for row in rows] == [
-        (1500, (Decimal("1.2"), Decimal("2.4"))),
-        (200, (Decimal("1.3"), Decimal("2.4"))),
+        (1500, (Decimal("1.2"), Decimal("2.55"))),
+        (200, (Decimal("1.3"), Decimal("2.55"))),
     ]
 
 
@@ -1378,7 +1418,9 @@ def test_straight_up_to_2000_is_one_nonstandard_piece_however_written(real_duct_
     if not pipeline.DEFAULT_TEMPLATE_PATH.is_file():
         pytest.skip("нет шаблона расчётки")
     coefficients = CoefficientTable.from_workbook(pipeline.DEFAULT_TEMPLATE_PATH)
-    nonstandard = (Decimal("1.5"), Decimal("3"))
+    # ⌀250 — стенка 2 мм по таблице: работа + 0,15 (Q55), в том числе у метража 1,5–2 м одной штукой.
+    nonstandard = (Decimal("1.5"), Decimal("3.15"))
+    nonstandard_rect = (Decimal("1.5"), Decimal("3"))
 
     def rows_for(text, size, qty, length=None):
         element_type = "straight_round" if "d" in size else "straight_rect"
@@ -1394,12 +1436,12 @@ def test_straight_up_to_2000_is_one_nonstandard_piece_however_written(real_duct_
 
     one_2000 = [(2000.0, 1.0, *nonstandard)]
     assert summary(rows_for("Воздуховод ф250 — 2 м", {"d": 250}, 2)) == one_2000
-    assert summary(rows_for("Воздуховод 700х400 — 2 м.п.", {"a": 700, "b": 400}, 2)) == one_2000
+    assert summary(rows_for("Воздуховод 700х400 — 2 м.п.", {"a": 700, "b": 400}, 2)) == [(2000.0, 1.0, *nonstandard_rect)]
     assert summary(rows_for("Воздуховод ф250 — 1,8 мп", {"d": 250}, 1.8)) == [(1800.0, 1.0, *nonstandard)]
     assert rows_for("Воздуховод ф250 — 2 м", {"d": 250}, 2)[0].nomenclature == "Воздуховод ф250 — 2 м"
-    # Ровно 1500 и короче — без изменений: одна штука с обычными коэффициентами.
-    assert summary(rows_for("Воздуховод ф250 — 1,5 м", {"d": 250}, 1.5)) == [(1500.0, 1.0, Decimal("1.2"), Decimal("2.4"))]
-    assert summary(rows_for("Воздуховод ф250 — 1,2 м", {"d": 250}, 1.2)) == [(1200.0, 1.0, Decimal("1.3"), Decimal("2.4"))]
+    # Ровно 1500 и короче — одна штука с обычными коэффициентами (2,4 + 0,15 за стенку 2 мм).
+    assert summary(rows_for("Воздуховод ф250 — 1,5 м", {"d": 250}, 1.5)) == [(1500.0, 1.0, Decimal("1.2"), Decimal("2.55"))]
+    assert summary(rows_for("Воздуховод ф250 — 1,2 м", {"d": 250}, 1.2)) == [(1200.0, 1.0, Decimal("1.3"), Decimal("2.55"))]
     # Больше 2 м — Q37: куски по 1500 и остаток.
     assert [row.length_mm for row in rows_for("Воздуховод ф250 — 2,1 м", {"d": 250}, 2.1)] == [1500, 600]
     assert [row.length_mm for row in rows_for("Воздуховод ф250 — 3,2 м", {"d": 250}, 3.2)] == [1500, 200]
@@ -1407,8 +1449,8 @@ def test_straight_up_to_2000_is_one_nonstandard_piece_however_written(real_duct_
     assert summary(rows_for("Воздуховод ф250 L=2000 — 3 шт", {"d": 250}, 3, 2000)) == [(2000.0, 3.0, *nonstandard)]
     assert summary(rows_for("Воздуховод ф250 L=2000 — 1 шт", {"d": 250}, 1, 2000)) == one_2000
     assert summary(rows_for("Воздуховод ф250 — 2 шт по 2 м", {"d": 250}, 2)) == [(2000.0, 2.0, *nonstandard)]
-    assert summary(rows_for("Воздуховод 500х300 — 3 шт по 3 м", {"a": 500, "b": 300}, 3)) == [(3000.0, 3.0, *nonstandard)]
-    assert summary(rows_for("Воздуховод ф250 — 4 шт. по 1 м", {"d": 250}, 4)) == [(1000.0, 4.0, Decimal("1.3"), Decimal("2.4"))]
+    assert summary(rows_for("Воздуховод 500х300 — 3 шт по 3 м", {"a": 500, "b": 300}, 3)) == [(3000.0, 3.0, *nonstandard_rect)]
+    assert summary(rows_for("Воздуховод ф250 — 4 шт. по 1 м", {"d": 250}, 4)) == [(1000.0, 4.0, Decimal("1.3"), Decimal("2.55"))]
     # Без «по» связку не трактуем: длина остаётся той, что дала модель.
     assert actions.pieces_of_meters("Воздуховод ф250 — 4 шт, 8 м") is None
     assert actions.pieces_of_meters("Воздуховод ф250 — 2 шт по 2000 мм") is None
@@ -1496,6 +1538,50 @@ def test_rect_round_transition_gets_round_fitting_coefficients(real_duct_calc):
     tee = row("Тройник 600х400/ф250", "tee_rect_round", {"a": 600, "b": 400, "branch_d": 250, "branch_length": 500},
               ("main_in", "main_out", "branch"))
     assert lm(tee) == (Decimal("1.5"), Decimal("3"))
+
+
+def test_thin_wall_2mm_adds_work_to_every_calculated_item(real_duct_calc):
+    """Q55 (заказчик, 12.11.2026): стенка ровно 2 мм — работа + 0,15 у фасона, шибера и явных 2 мм на прямоугольнике.
+    Раскрой не меняется; стенка 3 мм и покупные строки — без надбавки."""
+
+    from decimal import Decimal
+
+    actions._install_harness(None)
+    actions._install_harness(None)  # повторная установка не добавляет надбавку дважды
+    from duct_calc import pipeline
+    from duct_calc.coefficients import CoefficientTable
+    from duct_calc.model_schema import parse_model_response
+
+    if not pipeline.DEFAULT_TEMPLATE_PATH.is_file():
+        pytest.skip("нет шаблона расчётки")
+    coefficients = CoefficientTable.from_workbook(pipeline.DEFAULT_TEMPLATE_PATH)
+
+    def row(text, element_type, size, roles=("in", "out"), thickness=None, length=None):
+        raw = {"source_no": "1", "source_text": text, "element_type": element_type, "qty": 1, "size": size,
+               "thickness_mm": thickness, "length_mm": length,
+               "ends": [{"role": r, "connection": "flange"} for r in roles]}
+        position = parse_model_response({"positions": [raw]}).positions[0]
+        return pipeline.position_to_output_row(position, coefficients, connection_type="flange")
+
+    def lm(output):
+        return (Decimal(str(output.l)), Decimal(str(output.m)))
+
+    elbow_250 = row("Отвод 90 ф250", "elbow_round", {"d": 250, "angle": 90})
+    assert Decimal(str(elbow_250.thickness_mm)) == 2
+    assert lm(elbow_250) == (Decimal("1.5"), Decimal("2.85"))
+    assert lm(row("Отвод 90 ф400", "elbow_round", {"d": 400, "angle": 90})) == (Decimal("1.5"), Decimal("2.7"))
+
+    gate_250 = row("Шибер ф250", "straight_round", {"d": 250})
+    assert lm(gate_250) == (Decimal("1.5"), Decimal("3.15"))
+    assert lm(row("Шибер ф400", "straight_round", {"d": 400})) == (Decimal("1.5"), Decimal("3"))
+
+    rect_2mm = row("Воздуховод 300х200 толщ. 2 мм L1500", "straight_rect", {"a": 300, "b": 200}, thickness=2, length=1500)
+    assert lm(rect_2mm) == (Decimal("1.2"), Decimal("2.65"))
+    rect_3mm = row("Воздуховод 300х200 L1500", "straight_rect", {"a": 300, "b": 200}, length=1500)
+    assert lm(rect_3mm) == (Decimal("1.2"), Decimal("2.5"))
+
+    lone_flange = row("Фланец 200", "straight_round", {"d": 200})
+    assert lone_flange.purchased and lone_flange.m is None
 
 
 def test_offset_rect_2_pairs_a_with_first_shift_like_excel(real_duct_calc):
